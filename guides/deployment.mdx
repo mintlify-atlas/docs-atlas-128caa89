@@ -1,0 +1,610 @@
+---
+title: Deployment
+description: Deploy your ORPC + Better Auth application to production with proper configuration and security
+---
+
+This guide covers deploying your ORPC + Better Auth application to production, including database setup, environment configuration, and platform-specific instructions.
+
+## Pre-Deployment Checklist
+
+Before deploying to production, ensure you have:
+
+<Steps>
+  <Step title="Set Up Production Database">
+    Configure a production database (recommended: Turso). See the [Database Setup](/guides/database-setup) guide.
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Prepare all required environment variables for production. See the [Environment Variables](/guides/environment-variables) guide.
+  </Step>
+
+  <Step title="Test Locally">
+    Ensure your application builds and runs successfully:
+    ```bash
+    pnpm build
+    pnpm start
+    ```
+  </Step>
+
+  <Step title="Run Migrations">
+    Apply database migrations to your production database:
+    ```bash
+    pnpm db:push
+    ```
+  </Step>
+</Steps>
+
+## Environment Configuration
+
+### Required Production Variables
+
+Set these environment variables in your deployment platform:
+
+```bash .env.production
+# Server Configuration
+NEXT_PUBLIC_SERVER_URL=https://your-app.vercel.app
+
+# Database (Turso recommended)
+DATABASE_URL=libsql://your-db.turso.io?authToken=YOUR_TOKEN
+
+# Better Auth
+BETTER_AUTH_SECRET=<generate-secure-random-string>
+BETTER_AUTH_URL=https://your-app.vercel.app
+CORS_ORIGIN=https://your-app.vercel.app
+```
+
+<Warning>
+Generate a new `BETTER_AUTH_SECRET` for production. Never reuse development secrets:
+```bash
+openssl rand -base64 32
+```
+</Warning>
+
+### CORS Configuration
+
+The `CORS_ORIGIN` variable is critical for security. It controls which domains can make authenticated requests to your API.
+
+**Single Origin:**
+```bash
+CORS_ORIGIN=https://your-app.vercel.app
+```
+
+**Multiple Origins:**
+```bash
+CORS_ORIGIN=https://your-app.com,https://admin.your-app.com
+```
+
+This is configured in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ...
+  trustedOrigins: [process.env.CORS_ORIGIN || ""]
+})
+```
+
+<Info>
+For production, only include your actual production domain(s). Never use `*` or include development URLs.
+</Info>
+
+## Database Setup
+
+### Using Turso (Recommended)
+
+Turso provides a distributed SQLite database ideal for production:
+
+<Steps>
+  <Step title="Install Turso CLI">
+    ```bash
+    curl -sSfL https://get.tur.so/install.sh | bash
+    ```
+  </Step>
+
+  <Step title="Sign Up / Login">
+    ```bash
+    turso auth signup
+    # or
+    turso auth login
+    ```
+  </Step>
+
+  <Step title="Create Production Database">
+    ```bash
+    turso db create my-app-production
+    ```
+  </Step>
+
+  <Step title="Get Database URL">
+    ```bash
+    turso db show my-app-production --url
+    ```
+
+    Example output: `libsql://my-app-production-username.turso.io`
+  </Step>
+
+  <Step title="Create Auth Token">
+    ```bash
+    turso db tokens create my-app-production
+    ```
+
+    This generates a secure token for database authentication.
+  </Step>
+
+  <Step title="Combine URL and Token">
+    Create your `DATABASE_URL`:
+    ```bash
+    DATABASE_URL=libsql://my-app-production-username.turso.io?authToken=YOUR_TOKEN
+    ```
+  </Step>
+
+  <Step title="Apply Schema">
+    Set the `DATABASE_URL` locally and push your schema:
+    ```bash
+    export DATABASE_URL="libsql://..."
+    pnpm db:push
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Turso offers a generous free tier perfect for getting started. You can create multiple databases for different environments (staging, production).
+</Tip>
+
+### Database Migrations
+
+For production deployments, use versioned migrations:
+
+```bash
+# Generate migration files from schema changes
+pnpm db:generate
+
+# Review the generated SQL in src/db/migrations/
+
+# Apply migrations to production database
+DATABASE_URL=libsql://... pnpm db:migrate
+```
+
+<Warning>
+Always test migrations on a staging database before applying to production. Backup your data before running migrations.
+</Warning>
+
+## Building the Application
+
+Build your Next.js application for production:
+
+```bash
+pnpm build
+```
+
+This command:
+- Compiles TypeScript code
+- Optimizes bundles for production
+- Generates static pages where possible
+- Creates a `.next` directory with production artifacts
+
+### Build Script
+
+From `package.json`:
+
+```json package.json
+{
+  "scripts": {
+    "build": "next build",
+    "start": "next start"
+  }
+}
+```
+
+<Info>
+The build process will fail if there are TypeScript errors or build-time issues. Fix all errors before deploying.
+</Info>
+
+## Deployment Platforms
+
+### Vercel (Recommended)
+
+Vercel is the easiest way to deploy Next.js applications:
+
+<Steps>
+  <Step title="Install Vercel CLI">
+    ```bash
+    pnpm install -g vercel
+    ```
+  </Step>
+
+  <Step title="Login to Vercel">
+    ```bash
+    vercel login
+    ```
+  </Step>
+
+  <Step title="Deploy">
+    ```bash
+    vercel
+    ```
+
+    For production:
+    ```bash
+    vercel --prod
+    ```
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    In the Vercel dashboard:
+    1. Go to Project Settings → Environment Variables
+    2. Add all required variables
+    3. Set appropriate environments (Production, Preview, Development)
+  </Step>
+
+  <Step title="Redeploy">
+    After adding environment variables, trigger a new deployment:
+    ```bash
+    vercel --prod
+    ```
+  </Step>
+</Steps>
+
+#### Vercel-Specific Tips
+
+<CardGroup cols={2}>
+  <Card title="Automatic Deployments" icon="git">
+    Connect your GitHub repo for automatic deployments on every push.
+  </Card>
+
+  <Card title="Preview Deployments" icon="eye">
+    Every PR gets a unique preview URL for testing.
+  </Card>
+
+  <Card title="Edge Network" icon="globe">
+    Your app is automatically deployed to Vercel's global edge network.
+  </Card>
+
+  <Card title="Built for Next.js" icon="bolt">
+    Zero-configuration deployment optimized for Next.js.
+  </Card>
+</CardGroup>
+
+**Using VERCEL_URL:**
+
+Vercel exposes `VERCEL_URL` automatically. You can use it for dynamic URLs:
+
+```bash
+BETTER_AUTH_URL=https://${VERCEL_URL}
+NEXT_PUBLIC_SERVER_URL=https://${VERCEL_URL}
+```
+
+<Info>
+This automatically adapts to preview deployments, giving each PR its own working environment.
+</Info>
+
+### Netlify
+
+Deploy to Netlify using the CLI or GitHub integration:
+
+<Steps>
+  <Step title="Install Netlify CLI">
+    ```bash
+    pnpm install -g netlify-cli
+    ```
+  </Step>
+
+  <Step title="Login">
+    ```bash
+    netlify login
+    ```
+  </Step>
+
+  <Step title="Initialize Site">
+    ```bash
+    netlify init
+    ```
+  </Step>
+
+  <Step title="Configure Build Settings">
+    - Build command: `pnpm build`
+    - Publish directory: `.next`
+  </Step>
+
+  <Step title="Set Environment Variables">
+    ```bash
+    netlify env:set NEXT_PUBLIC_SERVER_URL "https://your-app.netlify.app"
+    netlify env:set DATABASE_URL "libsql://..."
+    # ... set all other variables
+    ```
+  </Step>
+
+  <Step title="Deploy">
+    ```bash
+    netlify deploy --prod
+    ```
+  </Step>
+</Steps>
+
+### Railway
+
+Deploy to Railway for a simple, all-in-one platform:
+
+<Steps>
+  <Step title="Install Railway CLI">
+    ```bash
+    npm i -g @railway/cli
+    ```
+  </Step>
+
+  <Step title="Login">
+    ```bash
+    railway login
+    ```
+  </Step>
+
+  <Step title="Initialize Project">
+    ```bash
+    railway init
+    ```
+  </Step>
+
+  <Step title="Set Environment Variables">
+    In the Railway dashboard or via CLI:
+    ```bash
+    railway variables set NEXT_PUBLIC_SERVER_URL=https://...
+    railway variables set DATABASE_URL=libsql://...
+    ```
+  </Step>
+
+  <Step title="Deploy">
+    ```bash
+    railway up
+    ```
+  </Step>
+</Steps>
+
+### Docker
+
+Deploy using Docker for maximum portability:
+
+<Steps>
+  <Step title="Create Dockerfile">
+    ```dockerfile Dockerfile
+    FROM node:20-alpine AS base
+
+    # Install dependencies
+    FROM base AS deps
+    RUN apk add --no-cache libc6-compat
+    WORKDIR /app
+
+    COPY package.json pnpm-lock.yaml* ./
+    RUN corepack enable pnpm && pnpm install --frozen-lockfile
+
+    # Build the app
+    FROM base AS builder
+    WORKDIR /app
+    COPY --from=deps /app/node_modules ./node_modules
+    COPY . .
+
+    RUN corepack enable pnpm && pnpm build
+
+    # Production image
+    FROM base AS runner
+    WORKDIR /app
+
+    ENV NODE_ENV=production
+
+    RUN addgroup --system --gid 1001 nodejs
+    RUN adduser --system --uid 1001 nextjs
+
+    COPY --from=builder /app/public ./public
+    COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+    COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+    USER nextjs
+
+    EXPOSE 3000
+
+    ENV PORT=3000
+
+    CMD ["node", "server.js"]
+    ```
+  </Step>
+
+  <Step title="Update next.config.ts">
+    Enable standalone output:
+    ```typescript next.config.ts
+    const nextConfig: NextConfig = {
+      output: 'standalone'
+    }
+    ```
+  </Step>
+
+  <Step title="Build Image">
+    ```bash
+    docker build -t my-app .
+    ```
+  </Step>
+
+  <Step title="Run Container">
+    ```bash
+    docker run -p 3000:3000 \
+      -e NEXT_PUBLIC_SERVER_URL=https://your-app.com \
+      -e DATABASE_URL=libsql://... \
+      -e BETTER_AUTH_SECRET=... \
+      -e BETTER_AUTH_URL=https://your-app.com \
+      -e CORS_ORIGIN=https://your-app.com \
+      my-app
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Use Docker Compose to manage environment variables more easily:
+```yaml
+services:
+  app:
+    build: .
+    env_file: .env.production
+    ports:
+      - "3000:3000"
+```
+</Tip>
+
+## Security Considerations
+
+<CardGroup cols={2}>
+  <Card title="Secret Rotation" icon="rotate">
+    Rotate `BETTER_AUTH_SECRET` periodically and after any suspected compromise.
+  </Card>
+
+  <Card title="HTTPS Only" icon="lock">
+    Always use HTTPS in production. Never deploy with `http://` URLs.
+  </Card>
+
+  <Card title="Environment Isolation" icon="layer-group">
+    Use separate databases and secrets for staging and production.
+  </Card>
+
+  <Card title="CORS Restrictions" icon="shield">
+    Only include necessary origins in `CORS_ORIGIN`. Never use `*` in production.
+  </Card>
+</CardGroup>
+
+### Additional Security Best Practices
+
+1. **Enable rate limiting** for authentication endpoints
+2. **Set up monitoring** for suspicious activity
+3. **Regular backups** of your production database
+4. **Keep dependencies updated** for security patches
+5. **Use environment-specific secrets** (never reuse between environments)
+
+<Warning>
+Never log sensitive environment variables. Ensure your logging doesn't expose `BETTER_AUTH_SECRET`, `DATABASE_URL` tokens, or other secrets.
+</Warning>
+
+## Post-Deployment
+
+### Verify Deployment
+
+After deploying, verify everything works:
+
+1. **Test authentication** - Sign up and sign in
+2. **Check database connections** - Verify data reads/writes work
+3. **Test ORPC calls** - Ensure RPC endpoints respond correctly
+4. **Monitor logs** - Check for any errors
+5. **Test CORS** - Verify cross-origin requests work if applicable
+
+### Monitoring
+
+Set up monitoring for your production application:
+
+- **Error tracking**: Use Sentry, LogRocket, or similar
+- **Performance monitoring**: Monitor API response times
+- **Database monitoring**: Track query performance and connection health
+- **Uptime monitoring**: Use UptimeRobot, Pingdom, or similar
+
+### Database Backups
+
+For Turso, backups are automatic. To create manual backups:
+
+```bash
+# Create a backup
+turso db dump my-app-production --output backup.sql
+
+# Restore from backup
+turso db shell my-app-production < backup.sql
+```
+
+<Info>
+Schedule regular backups and test your restore process to ensure you can recover from data loss.
+</Info>
+
+## Troubleshooting
+
+### Build Failures
+
+If your build fails:
+
+1. Run `pnpm build` locally to reproduce
+2. Check TypeScript errors: `pnpm typecheck`
+3. Verify all dependencies are installed
+4. Review build logs for specific errors
+
+### Environment Variable Issues
+
+If features aren't working:
+
+1. Verify all required variables are set in your deployment platform
+2. Check for typos in variable names (case-sensitive)
+3. Ensure `NEXT_PUBLIC_` prefix for client-side variables
+4. Redeploy after adding/changing variables
+
+### Database Connection Errors
+
+If you can't connect to the database:
+
+1. Verify `DATABASE_URL` format is correct
+2. Check that your Turso auth token is valid
+3. Test connection locally with the same `DATABASE_URL`
+4. Review database logs for connection attempts
+
+### CORS Errors
+
+If you're getting CORS errors in production:
+
+1. Verify `CORS_ORIGIN` exactly matches your frontend URL
+2. Remove trailing slashes or add them consistently
+3. Ensure `BETTER_AUTH_URL` is set correctly
+4. Check browser console for specific CORS error messages
+
+## Continuous Deployment
+
+Set up CI/CD for automatic deployments:
+
+### GitHub Actions Example
+
+```yaml .github/workflows/deploy.yml
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        run: corepack enable pnpm
+      
+      - name: Install dependencies
+        run: pnpm install
+      
+      - name: Type check
+        run: pnpm typecheck
+      
+      - name: Build
+        run: pnpm build
+      
+      - name: Deploy to Vercel
+        run: vercel --prod --token ${{ secrets.VERCEL_TOKEN }}
+```
+
+<Tip>
+Run type checking and tests in CI before deploying to catch issues early.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Setup" icon="database" href="/guides/database-setup">
+    Learn more about database configuration and management
+  </Card>
+
+  <Card title="Environment Variables" icon="key" href="/guides/environment-variables">
+    Detailed guide to all environment variables
+  </Card>
+</CardGroup>

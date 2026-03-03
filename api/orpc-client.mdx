@@ -1,0 +1,214 @@
+---
+title: 'ORPC Client'
+description: 'Type-safe RPC client setup and configuration'
+---
+
+# ORPC Client Setup
+
+The ORPC client provides end-to-end type safety for your RPC calls, ensuring that client code stays in sync with server-side router definitions.
+
+## Client Configuration
+
+The ORPC client is configured in `src/utils/orpc.ts` using `createORPCClient` with an `RPCLink` for HTTP communication.
+
+### Basic Setup
+
+```typescript
+import { createORPCClient } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import type { RouterClient } from "@orpc/server"
+import type { appRouter } from "@/routers"
+
+export const link = new RPCLink({
+  url: `${process.env.NEXT_PUBLIC_SERVER_URL}/rpc`,
+  headers: async () => {
+    if (typeof window !== "undefined") {
+      return {}
+    }
+
+    const { headers } = await import("next/headers")
+    return Object.fromEntries(await headers())
+  },
+  fetch(url, options) {
+    return fetch(url, {
+      ...options,
+      credentials: "include"
+    })
+  }
+})
+
+export const client: RouterClient<typeof appRouter> = createORPCClient(link)
+```
+
+## RPCLink Configuration
+
+### URL
+
+The RPC endpoint URL is constructed from the `NEXT_PUBLIC_SERVER_URL` environment variable:
+
+```typescript
+url: `${process.env.NEXT_PUBLIC_SERVER_URL}/rpc`
+```
+
+This points to your Next.js API route handler at `/rpc/[...all]`.
+
+### Headers
+
+Headers are handled differently for server-side and client-side requests:
+
+```typescript
+headers: async () => {
+  // Client-side: no additional headers
+  if (typeof window !== "undefined") {
+    return {}
+  }
+
+  // Server-side: forward Next.js request headers
+  const { headers } = await import("next/headers")
+  return Object.fromEntries(await headers())
+}
+```
+
+**Why this matters:**
+- **Server-side**: Forwards cookies and authentication headers from the incoming request
+- **Client-side**: Browser automatically handles cookies, no manual header forwarding needed
+
+### Credentials
+
+The `credentials: "include"` setting ensures cookies are sent with every request:
+
+```typescript
+fetch(url, options) {
+  return fetch(url, {
+    ...options,
+    credentials: "include"
+  })
+}
+```
+
+This is critical for Better Auth session management, as authentication tokens are stored in HTTP-only cookies.
+
+## Type-Safe Client
+
+The client is strongly typed using `RouterClient<typeof appRouter>`:
+
+```typescript
+export const client: RouterClient<typeof appRouter> = createORPCClient(link)
+```
+
+This provides:
+- **Full type inference** for all RPC methods
+- **Autocomplete** for available procedures
+- **Type checking** for input parameters and return values
+- **Compile-time errors** if server API changes
+
+## Calling RPC Methods
+
+### Server-Side Usage
+
+In Server Components and Server Actions, call RPC methods directly:
+
+```typescript
+import { client } from "@/utils/orpc"
+
+// In a Server Component
+export default async function ServerPage() {
+  const todos = await client.todo.getAll.call()
+  
+  return (
+    <div>
+      {todos.map((todo) => (
+        <div key={todo.id}>{todo.text}</div>
+      ))}
+    </div>
+  )
+}
+```
+
+**Example from `src/app/server/page.tsx:11`:**
+```typescript
+const todos = await orpc.todo.getAll.call()
+```
+
+### Client-Side Usage
+
+On the client, use the client with TanStack Query (see [TanStack Query integration](/api/tanstack-query)):
+
+```typescript
+import { orpc } from "@/utils/orpc"
+import { useQuery } from "@tanstack/react-query"
+
+// In a Client Component
+export default function ClientPage() {
+  const { data: todos } = useQuery(orpc.todo.getAll.queryOptions())
+  
+  return (
+    <div>
+      {todos?.map((todo) => (
+        <div key={todo.id}>{todo.text}</div>
+      ))}
+    </div>
+  )
+}
+```
+
+## Type Inference
+
+The client automatically infers types from your router definition:
+
+```typescript
+// Router definition (src/routers/todo.ts)
+export const todoRouter = {
+  create: publicProcedure
+    .input(z.object({ text: z.string().min(1) }))
+    .handler(async ({ input }) => {
+      return await db.insert(todo).values({
+        text: input.text
+      })
+    })
+}
+
+// Client usage - fully typed!
+await client.todo.create.call({ text: "Buy groceries" })
+//                               ^^^^ Type: { text: string }
+```
+
+TypeScript will error if you:
+- Pass incorrect parameter types
+- Forget required parameters
+- Try to access non-existent procedures
+
+## Available Procedures
+
+Based on your `appRouter` definition:
+
+```typescript
+client.healthCheck.call()           // Returns "OK"
+client.privateData.call()           // Returns { message, user } (requires auth)
+client.todo.getAll.call()           // Returns Todo[]
+client.todo.create.call({ text })   // Creates a todo
+client.todo.toggle.call({ id, completed }) // Toggles todo status
+client.todo.delete.call({ id })     // Deletes a todo
+```
+
+## Error Handling
+
+The client throws typed errors that you can catch:
+
+```typescript
+try {
+  await client.privateData.call()
+} catch (error) {
+  if (error.code === "UNAUTHORIZED") {
+    // Handle unauthorized access
+  }
+}
+```
+
+For client-side usage with TanStack Query, errors are handled through the QueryCache (see [TanStack Query integration](/api/tanstack-query)).
+
+## Next Steps
+
+- Learn about [TanStack Query integration](/api/tanstack-query) for React hooks
+- Explore [creating custom procedures](/core/procedures)
+- See [authentication setup](/core/authentication) for protected routes

@@ -1,0 +1,368 @@
+---
+title: Environment Variables
+description: Configure your application with the required environment variables for ORPC, Better Auth, and database connections
+---
+
+This guide covers all environment variables used in the ORPC + Better Auth starter template and how to configure them for development and production.
+
+## Overview
+
+Environment variables are stored in a `.env` file at the root of your project. The template includes a `.env.example` file showing all required variables:
+
+```bash .env.example
+NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+DATABASE_URL=file:./local.db
+```
+
+<Warning>
+Never commit your `.env` file to version control. It should always be in your `.gitignore`.
+</Warning>
+
+## Getting Started
+
+To set up your environment variables:
+
+<Steps>
+  <Step title="Copy the example file">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Update the values">
+    Edit `.env` and update each variable with your actual values.
+  </Step>
+
+  <Step title="Restart your development server">
+    Changes to `.env` require restarting the dev server:
+    ```bash
+    pnpm dev
+    ```
+  </Step>
+</Steps>
+
+## Required Variables
+
+### NEXT_PUBLIC_SERVER_URL
+
+<ParamField path="NEXT_PUBLIC_SERVER_URL" type="string" required>
+  The base URL where your Next.js application is running. This is used by the ORPC client to make API requests.
+</ParamField>
+
+**Development:**
+```bash
+NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+```
+
+**Production:**
+```bash
+NEXT_PUBLIC_SERVER_URL=https://your-app.vercel.app
+```
+
+<Info>
+The `NEXT_PUBLIC_` prefix makes this variable accessible in the browser. It's used by the ORPC client for making RPC calls.
+</Info>
+
+### DATABASE_URL
+
+<ParamField path="DATABASE_URL" type="string" required>
+  The connection string for your database. Supports SQLite file URLs and Turso (libSQL) remote URLs.
+</ParamField>
+
+**Development (Local SQLite):**
+```bash
+DATABASE_URL=file:./local.db
+```
+
+**Development (Local Turso):**
+```bash
+DATABASE_URL=http://127.0.0.1:8080
+```
+
+**Production (Turso):**
+```bash
+DATABASE_URL=libsql://your-db-name.turso.io?authToken=YOUR_TOKEN
+```
+
+<Tip>
+For Turso databases, include the auth token directly in the URL using the `?authToken=` query parameter.
+</Tip>
+
+See the [Database Setup](/guides/database-setup) guide for more details on configuring your database.
+
+## Optional Variables
+
+While not shown in `.env.example`, the following variables are used by Better Auth when configured:
+
+### BETTER_AUTH_SECRET
+
+<ParamField path="BETTER_AUTH_SECRET" type="string" required>
+  Secret key used by Better Auth for signing tokens and encrypting session data. Must be a strong, random string.
+</ParamField>
+
+**Generate a secret:**
+```bash
+openssl rand -base64 32
+```
+
+**Example:**
+```bash
+BETTER_AUTH_SECRET=Xy9k2P8mNzQ4vR7wL6tJ3hG5fD1aK9bM4nC8xV0pS2=
+```
+
+<Warning>
+Use a different secret for each environment (development, staging, production). Never share or commit this value.
+</Warning>
+
+This variable is referenced in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ...
+  secret: process.env.BETTER_AUTH_SECRET
+})
+```
+
+### BETTER_AUTH_URL
+
+<ParamField path="BETTER_AUTH_URL" type="string" required>
+  The base URL for Better Auth endpoints. Should match your application's URL.
+</ParamField>
+
+**Development:**
+```bash
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+**Production:**
+```bash
+BETTER_AUTH_URL=https://your-app.vercel.app
+```
+
+This is used by Better Auth to construct callback URLs and verify requests. It's configured in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ...
+  baseURL: process.env.BETTER_AUTH_URL
+})
+```
+
+### CORS_ORIGIN
+
+<ParamField path="CORS_ORIGIN" type="string">
+  The origin(s) allowed to make requests to your API. Used for CORS configuration in Better Auth.
+</ParamField>
+
+**Development:**
+```bash
+CORS_ORIGIN=http://localhost:3000
+```
+
+**Production:**
+```bash
+CORS_ORIGIN=https://your-app.vercel.app
+```
+
+**Multiple Origins:**
+```bash
+CORS_ORIGIN=https://your-app.vercel.app,https://staging.your-app.vercel.app
+```
+
+This is configured in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ...
+  trustedOrigins: [process.env.CORS_ORIGIN || ""]
+})
+```
+
+<Info>
+If you have multiple frontend domains (e.g., separate marketing site), you can specify multiple comma-separated origins.
+</Info>
+
+## Complete Example
+
+Here's a complete `.env` file example:
+
+### Development
+
+```bash .env
+# Server Configuration
+NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+
+# Database
+DATABASE_URL=file:./local.db
+
+# Better Auth
+BETTER_AUTH_SECRET=Xy9k2P8mNzQ4vR7wL6tJ3hG5fD1aK9bM4nC8xV0pS2=
+BETTER_AUTH_URL=http://localhost:3000
+CORS_ORIGIN=http://localhost:3000
+```
+
+### Production
+
+```bash .env.production
+# Server Configuration
+NEXT_PUBLIC_SERVER_URL=https://your-app.vercel.app
+
+# Database
+DATABASE_URL=libsql://your-db-name.turso.io?authToken=eyJhbGc...
+
+# Better Auth
+BETTER_AUTH_SECRET=A5d9K2mP7nL4vR9wJ6tG3hF1xC8bN0qS5pV2zM8yT4=
+BETTER_AUTH_URL=https://your-app.vercel.app
+CORS_ORIGIN=https://your-app.vercel.app
+```
+
+## Environment-Specific Configuration
+
+### Using Multiple .env Files
+
+Next.js supports multiple environment files:
+
+- `.env` - Loaded in all environments
+- `.env.local` - Local overrides (ignored by git)
+- `.env.development` - Development-specific
+- `.env.production` - Production-specific
+
+<Tip>
+Use `.env.local` for your personal development settings that shouldn't be committed.
+</Tip>
+
+### Loading Priority
+
+Next.js loads environment files in this order (later files override earlier ones):
+
+1. `.env`
+2. `.env.local`
+3. `.env.development` or `.env.production`
+4. `.env.development.local` or `.env.production.local`
+
+## Accessing Environment Variables
+
+### Server-Side
+
+Server-side code can access any environment variable using `process.env`:
+
+```typescript
+const databaseUrl = process.env.DATABASE_URL
+const authSecret = process.env.BETTER_AUTH_SECRET
+```
+
+### Client-Side
+
+Only variables prefixed with `NEXT_PUBLIC_` are accessible in the browser:
+
+```typescript
+const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL // ✅ Works
+const databaseUrl = process.env.DATABASE_URL // ❌ undefined in browser
+```
+
+<Warning>
+Never use the `NEXT_PUBLIC_` prefix for secrets or sensitive data. These values are embedded in the client-side JavaScript bundle and visible to users.
+</Warning>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Generate Strong Secrets" icon="key">
+    Always use cryptographically secure random strings for secrets:
+    ```bash
+    openssl rand -base64 32
+    ```
+  </Card>
+
+  <Card title="Never Commit Secrets" icon="shield">
+    Add `.env` to `.gitignore` and never commit sensitive values to version control.
+  </Card>
+
+  <Card title="Use Different Secrets" icon="layer-group">
+    Use unique secrets for each environment (dev, staging, production).
+  </Card>
+
+  <Card title="Rotate Regularly" icon="rotate">
+    Periodically rotate secrets, especially if they may have been exposed.
+  </Card>
+</CardGroup>
+
+## Deployment Platforms
+
+How to set environment variables on popular platforms:
+
+### Vercel
+
+1. Go to your project settings
+2. Navigate to "Environment Variables"
+3. Add each variable with the appropriate environment (Production, Preview, Development)
+
+<Tip>
+Vercel automatically exposes `VERCEL_URL` which you can use for `NEXT_PUBLIC_SERVER_URL` and `BETTER_AUTH_URL` by setting them to `https://${process.env.VERCEL_URL}`.
+</Tip>
+
+### Netlify
+
+1. Go to Site settings > Environment variables
+2. Add each variable with values for different contexts
+
+### Railway
+
+1. Go to your project
+2. Click on "Variables"
+3. Add each environment variable
+
+### Docker
+
+Pass environment variables using:
+
+```bash
+docker run -e NEXT_PUBLIC_SERVER_URL=http://localhost:3000 \
+  -e DATABASE_URL=file:./local.db \
+  your-image
+```
+
+Or use an env file:
+
+```bash
+docker run --env-file .env your-image
+```
+
+## Troubleshooting
+
+### Variables Not Loading
+
+If environment variables aren't loading:
+
+1. Restart your development server after changing `.env`
+2. Verify the variable name is correct (case-sensitive)
+3. For client-side access, ensure it has the `NEXT_PUBLIC_` prefix
+4. Check that `.env` is in the project root
+
+### Undefined in Production
+
+If variables work locally but not in production:
+
+1. Verify you've set them in your deployment platform
+2. Check that you've selected the correct environment (Production vs Preview)
+3. Redeploy after adding variables
+
+### CORS Errors
+
+If you're getting CORS errors:
+
+1. Verify `CORS_ORIGIN` matches your frontend URL exactly
+2. Check for trailing slashes (be consistent)
+3. Ensure `BETTER_AUTH_URL` matches your deployment URL
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Setup" icon="database" href="/guides/database-setup">
+    Configure your database with the DATABASE_URL variable
+  </Card>
+
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Learn how to deploy with the correct environment configuration
+  </Card>
+</CardGroup>

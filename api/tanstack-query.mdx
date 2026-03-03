@@ -1,0 +1,385 @@
+---
+title: 'TanStack Query Integration'
+description: 'Using ORPC with React Query for client-side data fetching'
+---
+
+# TanStack Query Integration
+
+ORPC integrates seamlessly with TanStack Query (React Query) to provide powerful client-side data fetching with caching, automatic refetching, and optimistic updates.
+
+## Setup
+
+The TanStack Query integration is configured in `src/utils/orpc.ts`:
+
+```typescript
+import { createTanstackQueryUtils } from "@orpc/tanstack-query"
+import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { client } from "@/utils/orpc"
+
+export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      toast.error(`Error: ${error.message}`, {
+        action: {
+          label: "retry",
+          onClick: () => {
+            queryClient.invalidateQueries()
+          }
+        }
+      })
+    }
+  })
+})
+
+export const orpc = createTanstackQueryUtils(client)
+```
+
+## QueryClient Configuration
+
+### Error Handling with Toasts
+
+The `QueryCache` is configured to show toast notifications on errors:
+
+```typescript
+queryCache: new QueryCache({
+  onError: (error) => {
+    toast.error(`Error: ${error.message}`, {
+      action: {
+        label: "retry",
+        onClick: () => {
+          queryClient.invalidateQueries()
+        }
+      }
+    })
+  }
+})
+```
+
+**Benefits:**
+- **Automatic error notifications**: Users see errors immediately
+- **Retry action**: Built-in retry button invalidates all queries
+- **Global error handling**: No need to handle errors in every component
+
+### Creating Query Utils
+
+The `createTanstackQueryUtils` function wraps your ORPC client:
+
+```typescript
+export const orpc = createTanstackQueryUtils(client)
+```
+
+This creates type-safe query and mutation helpers for all your RPC procedures.
+
+## Using Queries
+
+### Basic Query
+
+Use `queryOptions()` to create TanStack Query options:
+
+```typescript
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/utils/orpc"
+
+export default function TodoList() {
+  const { data: todos, isLoading } = useQuery(orpc.todo.getAll.queryOptions())
+
+  if (isLoading) return <div>Loading...</div>
+
+  return (
+    <ul>
+      {todos?.map((todo) => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+**Real example from `src/app/todos/page.tsx:21`:**
+```typescript
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+```
+
+### Query with Authentication
+
+Protected procedures automatically include credentials:
+
+```typescript
+const { data: privateData } = useQuery(orpc.privateData.queryOptions())
+```
+
+**Real example from `src/app/dashboard/page.tsx:12`:**
+```typescript
+const privateData = useQuery(orpc.privateData.queryOptions())
+```
+
+If the user is not authenticated, the query will fail and show an error toast.
+
+## Using Mutations
+
+### Basic Mutation
+
+Use `mutationOptions()` to create mutation configurations:
+
+```typescript
+import { useMutation } from "@tanstack/react-query"
+import { orpc } from "@/utils/orpc"
+
+export default function CreateTodo() {
+  const createMutation = useMutation(
+    orpc.todo.create.mutationOptions({
+      onSuccess: () => {
+        // Handle success
+      }
+    })
+  )
+
+  const handleCreate = () => {
+    createMutation.mutate({ text: "New todo" })
+  }
+
+  return (
+    <button 
+      onClick={handleCreate}
+      disabled={createMutation.isPending}
+    >
+      {createMutation.isPending ? "Creating..." : "Create"}
+    </button>
+  )
+}
+```
+
+### Mutation with Refetch
+
+Invalidate queries after mutations to refetch fresh data:
+
+**Real example from `src/app/todos/page.tsx:22-29`:**
+```typescript
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+
+const createMutation = useMutation(
+  orpc.todo.create.mutationOptions({
+    onSuccess: () => {
+      todos.refetch()  // Refetch todos after creating
+      setNewTodoText("")
+    }
+  })
+)
+```
+
+### Multiple Mutations
+
+Handle multiple related mutations efficiently:
+
+**Real example from `src/app/todos/page.tsx:30-43`:**
+```typescript
+const toggleMutation = useMutation(
+  orpc.todo.toggle.mutationOptions({
+    onSuccess: () => {
+      todos.refetch()
+    }
+  })
+)
+
+const deleteMutation = useMutation(
+  orpc.todo.delete.mutationOptions({
+    onSuccess: () => {
+      todos.refetch()
+    }
+  })
+)
+```
+
+## Complete Component Example
+
+Here's a full example combining queries and mutations:
+
+**From `src/app/todos/page.tsx`:**
+```typescript
+"use client"
+
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { useState } from "react"
+import { orpc } from "@/utils/orpc"
+
+export default function TodosPage() {
+  const [newTodoText, setNewTodoText] = useState("")
+
+  // Query for fetching todos
+  const todos = useQuery(orpc.todo.getAll.queryOptions())
+  
+  // Mutation for creating todos
+  const createMutation = useMutation(
+    orpc.todo.create.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+        setNewTodoText("")
+      }
+    })
+  )
+  
+  // Mutation for toggling completion
+  const toggleMutation = useMutation(
+    orpc.todo.toggle.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+      }
+    })
+  )
+  
+  // Mutation for deleting todos
+  const deleteMutation = useMutation(
+    orpc.todo.delete.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+      }
+    })
+  )
+
+  const handleAddTodo = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newTodoText.trim()) {
+      createMutation.mutate({ text: newTodoText })
+    }
+  }
+
+  const handleToggleTodo = (id: number, completed: boolean) => {
+    toggleMutation.mutate({ id, completed: !completed })
+  }
+
+  const handleDeleteTodo = (id: number) => {
+    deleteMutation.mutate({ id })
+  }
+
+  return (
+    <div>
+      {/* Form for creating todos */}
+      <form onSubmit={handleAddTodo}>
+        <input
+          value={newTodoText}
+          onChange={(e) => setNewTodoText(e.target.value)}
+          disabled={createMutation.isPending}
+        />
+        <button 
+          type="submit"
+          disabled={createMutation.isPending || !newTodoText.trim()}
+        >
+          {createMutation.isPending ? "Adding..." : "Add"}
+        </button>
+      </form>
+
+      {/* Todo list */}
+      {todos.isLoading ? (
+        <div>Loading...</div>
+      ) : (
+        <ul>
+          {todos.data?.map((todo) => (
+            <li key={todo.id}>
+              <input
+                type="checkbox"
+                checked={todo.completed}
+                onChange={() => handleToggleTodo(todo.id, todo.completed)}
+              />
+              <span>{todo.text}</span>
+              <button onClick={() => handleDeleteTodo(todo.id)}>
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+```
+
+## Loading States
+
+TanStack Query provides granular loading states:
+
+```typescript
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+
+if (todos.isLoading) return <div>Loading...</div>
+if (todos.error) return <div>Error: {todos.error.message}</div>
+if (!todos.data) return <div>No data</div>
+
+return <div>{/* Render data */}</div>
+```
+
+## Mutation States
+
+Mutations also provide detailed state information:
+
+```typescript
+const mutation = useMutation(orpc.todo.create.mutationOptions())
+
+<button disabled={mutation.isPending}>
+  {mutation.isPending ? "Creating..." : "Create"}
+</button>
+
+{mutation.error && <div>Error: {mutation.error.message}</div>}
+{mutation.isSuccess && <div>Success!</div>}
+```
+
+## Cache Invalidation
+
+Invalidate queries to trigger refetches:
+
+```typescript
+import { queryClient } from "@/utils/orpc"
+
+// Invalidate all queries
+queryClient.invalidateQueries()
+
+// Invalidate specific query
+queryClient.invalidateQueries({ queryKey: ["todo", "getAll"] })
+```
+
+## Type Safety
+
+All query and mutation options are fully typed:
+
+```typescript
+// Input is typed based on procedure definition
+createMutation.mutate({ text: "New todo" })
+//                     ^^^^ Type: { text: string }
+
+// Return data is also typed
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+//    ^^^^^ Type: Todo[] | undefined
+```
+
+## Retry Logic
+
+TanStack Query automatically retries failed queries. The global error handler provides a manual retry option:
+
+```typescript
+queryCache: new QueryCache({
+  onError: (error) => {
+    toast.error(`Error: ${error.message}`, {
+      action: {
+        label: "retry",
+        onClick: () => {
+          queryClient.invalidateQueries()  // Retry all failed queries
+        }
+      }
+    })
+  }
+})
+```
+
+## Best Practices
+
+1. **Refetch after mutations**: Always refetch related queries after successful mutations
+2. **Use loading states**: Show loading indicators during queries and mutations
+3. **Handle errors gracefully**: The global error handler catches most errors, but handle specific cases when needed
+4. **Disable during mutations**: Disable form inputs while mutations are pending
+5. **Invalidate queries**: Use `queryClient.invalidateQueries()` for cache invalidation
+
+## Next Steps
+
+- Learn about [ORPC client setup](/api/orpc-client)
+- Explore [creating custom procedures](/core/procedures)
+- See [authentication integration](/core/authentication)

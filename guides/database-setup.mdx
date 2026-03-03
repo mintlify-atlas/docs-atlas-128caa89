@@ -1,0 +1,380 @@
+---
+title: Database Setup
+description: Complete guide to setting up and managing your database with SQLite, Turso, and Drizzle ORM
+---
+
+This guide walks you through setting up the database for your ORPC + Better Auth application using SQLite/Turso and Drizzle ORM.
+
+## Database Options
+
+The starter template supports two database configurations:
+
+- **Local Development**: SQLite with a local file (`file:./local.db`)
+- **Production/Remote**: Turso (libSQL) with a remote database URL
+
+Both use the same Drizzle ORM setup and can be switched seamlessly via the `DATABASE_URL` environment variable.
+
+## Configuration
+
+### Drizzle Config
+
+The database configuration is defined in `drizzle.config.ts`:
+
+```typescript drizzle.config.ts
+import { defineConfig } from "drizzle-kit"
+
+export default defineConfig({
+  schema: "./src/db/schema",
+  out: "./src/db/migrations",
+  dialect: "turso",
+  dbCredentials: {
+    url: process.env.DATABASE_URL || ""
+  }
+})
+```
+
+This configuration:
+- Points to schema files in `./src/db/schema`
+- Outputs migrations to `./src/db/migrations`
+- Uses the `turso` dialect (compatible with SQLite)
+- Reads the database URL from the `DATABASE_URL` environment variable
+
+### Database Connection
+
+The database client is initialized in `src/db/index.ts`:
+
+```typescript src/db/index.ts
+import { createClient } from "@libsql/client"
+import { drizzle } from "drizzle-orm/libsql"
+
+const client = createClient({
+  url: process.env.DATABASE_URL || ""
+})
+
+export const db = drizzle({ client })
+```
+
+## Database Schema
+
+The starter includes two schema files:
+
+### Authentication Schema
+
+Defined in `src/db/schema/auth.ts`, this schema contains all tables required by Better Auth:
+
+```typescript src/db/schema/auth.ts
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+
+export const user = sqliteTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: integer("email_verified", { mode: "boolean" }).notNull(),
+  image: text("image"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
+})
+
+export const session = sqliteTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id)
+})
+
+export const account = sqliteTable("account", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  providerId: text("provider_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  idToken: text("id_token"),
+  accessTokenExpiresAt: integer("access_token_expires_at", {
+    mode: "timestamp"
+  }),
+  refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+    mode: "timestamp"
+  }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
+})
+
+export const verification = sqliteTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+})
+```
+
+### Todo Schema
+
+Defined in `src/db/schema/todo.ts`, this is an example application schema:
+
+```typescript src/db/schema/todo.ts
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+
+export const todo = sqliteTable("todo", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  completed: integer("completed", { mode: "boolean" }).default(false).notNull()
+})
+```
+
+<Info>
+You can add more schema files in the `src/db/schema` directory. Drizzle will automatically detect them based on the configuration.
+</Info>
+
+## Setup Steps
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install all required dependencies:
+
+    ```bash
+    pnpm install
+    ```
+
+    This installs:
+    - `drizzle-orm` - ORM library
+    - `drizzle-kit` - CLI tool for migrations
+    - `@libsql/client` - Database client for SQLite/Turso
+  </Step>
+
+  <Step title="Configure Environment">
+    Set up your `.env` file with the database URL:
+
+    ```bash .env
+    DATABASE_URL=file:./local.db
+    ```
+
+    For local development, use the SQLite file URL format. For production, use your Turso database URL.
+
+    See the [Environment Variables](/guides/environment-variables) guide for more details.
+  </Step>
+
+  <Step title="Push Schema to Database">
+    Push your schema to the database without generating migration files:
+
+    ```bash
+    pnpm db:push
+    ```
+
+    This command applies your schema directly to the database. It's perfect for local development and rapid prototyping.
+
+    <Tip>
+    Use `db:push` during development for quick iterations. For production deployments, use `db:generate` and `db:migrate` to create versioned migration files.
+    </Tip>
+  </Step>
+
+  <Step title="(Optional) Generate Migrations">
+    For production or when you want versioned migrations, generate migration files:
+
+    ```bash
+    pnpm db:generate
+    ```
+
+    This creates SQL migration files in `src/db/migrations` based on your schema changes.
+
+    Then apply the migrations:
+
+    ```bash
+    pnpm db:migrate
+    ```
+  </Step>
+</Steps>
+
+## Local Development with Turso
+
+For local development, you can use Turso's local development server which provides a SQLite-compatible interface:
+
+```bash
+pnpm db:local
+```
+
+This command runs `turso dev --db-file local.db`, which:
+- Creates a local SQLite database file (`local.db`)
+- Starts a local server that emulates Turso's API
+- Allows you to develop against a local database with the same interface as production
+
+<Info>
+The local Turso server is optional. You can also use a direct SQLite file connection with `DATABASE_URL=file:./local.db`.
+</Info>
+
+## Database Management
+
+### Drizzle Studio
+
+Drizzle Kit includes a visual database browser called Drizzle Studio:
+
+```bash
+pnpm db:studio
+```
+
+This opens a web interface where you can:
+- Browse your database tables and data
+- Run queries
+- Edit records directly
+- Inspect relationships
+
+<Tip>
+Drizzle Studio is extremely helpful for debugging and exploring your database during development.
+</Tip>
+
+### Available Scripts
+
+All database-related scripts are defined in `package.json`:
+
+| Command | Description |
+|---------|-------------|
+| `pnpm db:push` | Push schema changes directly to the database (development) |
+| `pnpm db:generate` | Generate migration files from schema changes |
+| `pnpm db:migrate` | Apply generated migrations to the database |
+| `pnpm db:studio` | Open Drizzle Studio visual database browser |
+| `pnpm db:local` | Start local Turso development server |
+
+## Production Setup
+
+### Using Turso
+
+For production, we recommend using [Turso](https://turso.tech), a distributed SQLite database:
+
+<Steps>
+  <Step title="Create a Turso Account">
+    Sign up at [turso.tech](https://turso.tech) and install the Turso CLI.
+  </Step>
+
+  <Step title="Create a Database">
+    ```bash
+    turso db create my-app-db
+    ```
+  </Step>
+
+  <Step title="Get the Database URL">
+    ```bash
+    turso db show my-app-db --url
+    ```
+
+    This outputs a URL like: `libsql://my-app-db-username.turso.io`
+  </Step>
+
+  <Step title="Create an Auth Token">
+    ```bash
+    turso db tokens create my-app-db
+    ```
+
+    This generates an authentication token for your database.
+  </Step>
+
+  <Step title="Update Environment Variables">
+    Set your production `DATABASE_URL` with the auth token:
+
+    ```bash
+    DATABASE_URL=libsql://my-app-db-username.turso.io?authToken=YOUR_TOKEN
+    ```
+  </Step>
+
+  <Step title="Run Migrations">
+    Apply your schema to the production database:
+
+    ```bash
+    pnpm db:push
+    # or
+    pnpm db:migrate
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Never commit your Turso auth token to version control. Always use environment variables.
+</Warning>
+
+## Schema Modifications
+
+When you modify your database schema:
+
+1. **Update the schema files** in `src/db/schema/`
+2. **For local development**:
+   ```bash
+   pnpm db:push
+   ```
+3. **For production** (with versioned migrations):
+   ```bash
+   pnpm db:generate
+   pnpm db:migrate
+   ```
+
+<Tip>
+Always test schema changes locally before applying them to production.
+</Tip>
+
+## Adding New Tables
+
+To add a new table to your database:
+
+1. Create a new file in `src/db/schema/` (e.g., `posts.ts`):
+
+```typescript src/db/schema/posts.ts
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { user } from "./auth"
+
+export const posts = sqliteTable("posts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  authorId: text("author_id")
+    .notNull()
+    .references(() => user.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull()
+})
+```
+
+2. Push the changes to your database:
+
+```bash
+pnpm db:push
+```
+
+The new table will be automatically created.
+
+## Troubleshooting
+
+### Database Connection Errors
+
+If you encounter connection errors:
+
+1. Verify your `DATABASE_URL` is set correctly in `.env`
+2. For local development, ensure the database file path is accessible
+3. For Turso, verify your auth token is valid
+
+### Schema Sync Issues
+
+If your database schema is out of sync:
+
+1. Delete your local database file: `rm local.db`
+2. Run `pnpm db:push` to recreate it
+
+<Warning>
+Deleting your database file will remove all data. Only do this in development.
+</Warning>
+
+### Migration Conflicts
+
+If you have migration conflicts:
+
+1. Review the generated migrations in `src/db/migrations/`
+2. Manually adjust if needed
+3. Run `pnpm db:migrate` to apply them

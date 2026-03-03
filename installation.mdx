@@ -1,0 +1,542 @@
+---
+title: Installation
+description: Detailed installation and configuration guide for ORPC + Better Auth
+---
+
+# Installation Guide
+
+This guide provides comprehensive instructions for installing and configuring your ORPC + Better Auth application. Whether you're setting up for local development or preparing for production, this guide covers everything you need.
+
+## System Requirements
+
+- **Node.js**: Version 20.0.0 or higher
+- **Package Manager**: pnpm 9.15.4+ (recommended), npm, or yarn
+- **Operating System**: macOS, Windows, or Linux
+- **Memory**: At least 4GB RAM recommended
+- **Disk Space**: ~500MB for dependencies
+
+## Package Manager Setup
+
+This project uses **pnpm** as the package manager. While you can use npm or yarn, pnpm is recommended for its speed and efficiency.
+
+### Installing pnpm
+
+<CodeGroup>
+```bash npm
+npm install -g pnpm
+```
+
+```bash brew (macOS)
+brew install pnpm
+```
+
+```bash curl (Unix)
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+
+```bash powershell (Windows)
+iwr https://get.pnpm.io/install.ps1 -useb | iex
+```
+</CodeGroup>
+
+Verify the installation:
+
+```bash
+pnpm --version
+# Should output: 9.15.4 or higher
+```
+
+## Project Setup
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the starter template to your local machine:
+    
+    ```bash
+    git clone <repository-url> my-app
+    cd my-app
+    ```
+    
+    <Note>
+      Replace `<repository-url>` with the actual repository URL and `my-app` with your project name.
+    </Note>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all required packages:
+    
+    ```bash
+    pnpm install
+    ```
+    
+    This installs all dependencies defined in `package.json`:
+    
+    **Core Dependencies:**
+    - `@orpc/server@1.5.0` - ORPC server-side runtime
+    - `@orpc/client@1.5.0` - ORPC client for making type-safe calls
+    - `@orpc/tanstack-query@1.5.0` - TanStack Query integration
+    - `better-auth@1.3.4` - Authentication library
+    - `next@15.3.0` - Next.js framework
+    - `react@19.0.0` - React library
+    - `drizzle-orm@0.44.2` - TypeScript ORM
+    - `@libsql/client@0.15.9` - SQLite/Turso client
+    - `zod@4.0.2` - Schema validation
+    
+    **UI Dependencies:**
+    - `radix-ui@1.4.2` - Primitive UI components
+    - `tailwind-merge@3.3.1` - Tailwind utility function
+    - `class-variance-authority@0.7.1` - CSS variant management
+    - `lucide-react@0.487.0` - Icon library
+    - `next-themes@0.4.6` - Theme management
+    - `sonner@2.0.5` - Toast notifications
+    
+    **Development Tools:**
+    - `@biomejs/biome@2.1.2` - Fast linter and formatter
+    - `drizzle-kit@0.31.2` - Drizzle ORM CLI tools
+    - `typescript@5` - TypeScript compiler
+  </Step>
+
+  <Step title="Environment Configuration">
+    Create your environment configuration file:
+    
+    ```bash
+    cp .env.example .env
+    ```
+    
+    The `.env.example` file contains:
+    
+    ```bash .env.example
+    NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+    DATABASE_URL=file:./local.db
+    ```
+    
+    ### Environment Variables Explained
+    
+    <ParamField path="NEXT_PUBLIC_SERVER_URL" type="string" required>
+      The base URL for your application. Used by:
+      - ORPC client for API calls (`/rpc` endpoint)
+      - Better Auth client for authentication requests
+      
+      **Local development**: `http://localhost:3000`
+      
+      **Production**: Your deployed URL (e.g., `https://myapp.com`)
+      
+      <Warning>
+        Must include the protocol (`http://` or `https://`) and match the URL you're accessing. CORS and authentication cookies depend on this being correct.
+      </Warning>
+    </ParamField>
+    
+    <ParamField path="DATABASE_URL" type="string" required>
+      Database connection string for Drizzle ORM.
+      
+      **Local SQLite**: `file:./local.db`
+      
+      **Turso (production)**: `libsql://[database-name].turso.io?authToken=[token]`
+      
+      The Turso CLI (`pnpm db:local`) uses this to create a local database file.
+    </ParamField>
+    
+    <ParamField path="BETTER_AUTH_SECRET" type="string">
+      Secret key for encrypting sessions and tokens. Required for production.
+      
+      Generate a secure random string:
+      
+      ```bash
+      openssl rand -base64 32
+      ```
+      
+      <Warning>
+        Keep this secret and never commit it to version control. Use different values for development and production.
+      </Warning>
+    </ParamField>
+    
+    <ParamField path="BETTER_AUTH_URL" type="string">
+      The base URL for Better Auth. Defaults to `NEXT_PUBLIC_SERVER_URL` if not set.
+      
+      Only needed if your auth endpoint is on a different domain.
+    </ParamField>
+    
+    <ParamField path="CORS_ORIGIN" type="string">
+      Allowed origin for CORS requests. Used by Better Auth to validate request origins.
+      
+      **Development**: Usually not needed (defaults to `NEXT_PUBLIC_SERVER_URL`)
+      
+      **Production**: Set to your frontend domain if different from API
+    </ParamField>
+  </Step>
+</Steps>
+
+## Database Configuration
+
+This project uses **Drizzle ORM** with **SQLite/Turso** for the database. Two options are available:
+
+### Option 1: Local SQLite (Development)
+
+Best for local development and testing.
+
+<Steps>
+  <Step title="Start the Local Database">
+    The Turso CLI provides a local SQLite server:
+    
+    ```bash
+    pnpm db:local
+    ```
+    
+    This command:
+    - Creates a `local.db` file in your project root
+    - Starts a Turso-compatible local server
+    - Watches for schema changes
+    
+    <Note>
+      Keep this terminal running while you develop. The database server needs to be active for your application to work.
+    </Note>
+  </Step>
+
+  <Step title="Push the Schema">
+    Apply your database schema to create the tables:
+    
+    ```bash
+    pnpm db:push
+    ```
+    
+    This creates tables for:
+    - **Authentication**: `user`, `session`, `account`, `verification`
+    - **Application**: `todo` (example table)
+    
+    The schema is defined in:
+    - `src/db/schema/auth.ts` - Better Auth tables
+    - `src/db/schema/todo.ts` - Application tables
+  </Step>
+
+  <Step title="Verify the Setup">
+    Open Drizzle Studio to inspect your database:
+    
+    ```bash
+    pnpm db:studio
+    ```
+    
+    This opens a web interface at `https://local.drizzle.studio` where you can:
+    - Browse tables and data
+    - Run queries
+    - Inspect schema structure
+  </Step>
+</Steps>
+
+### Option 2: Turso (Production)
+
+Recommended for production deployments.
+
+<Steps>
+  <Step title="Install Turso CLI">
+    ```bash
+    curl -sSfL https://get.tur.so/install.sh | bash
+    ```
+    
+    Or use your package manager:
+    
+    <CodeGroup>
+    ```bash brew
+    brew install tursodatabase/tap/turso
+    ```
+    
+    ```bash scoop (Windows)
+    scoop install turso
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create a Turso Database">
+    Sign up and create a database:
+    
+    ```bash
+    turso auth signup
+    turso db create my-app-db
+    ```
+  </Step>
+
+  <Step title="Get Connection Credentials">
+    Retrieve your database URL and authentication token:
+    
+    ```bash
+    turso db show my-app-db --url
+    turso db tokens create my-app-db
+    ```
+    
+    Update your `.env` file:
+    
+    ```bash
+    DATABASE_URL=libsql://my-app-db.turso.io?authToken=your-token-here
+    ```
+  </Step>
+
+  <Step title="Push Schema to Turso">
+    Apply your schema to the production database:
+    
+    ```bash
+    pnpm db:push
+    ```
+  </Step>
+</Steps>
+
+## Drizzle Configuration
+
+The database configuration is in `drizzle.config.ts`:
+
+```typescript drizzle.config.ts
+import { defineConfig } from "drizzle-kit"
+
+export default defineConfig({
+  schema: "./src/db/schema",
+  out: "./src/db/migrations",
+  dialect: "turso",
+  dbCredentials: {
+    url: process.env.DATABASE_URL || ""
+  }
+})
+```
+
+### Database Schema Files
+
+**Authentication Schema** (`src/db/schema/auth.ts`):
+
+Better Auth automatically creates these tables via Drizzle adapter:
+- `user` - User accounts
+- `session` - Active sessions
+- `account` - OAuth accounts (if enabled)
+- `verification` - Email verification tokens
+
+**Application Schema** (`src/db/schema/todo.ts`):
+
+```typescript
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+
+export const todo = sqliteTable("todo", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  completed: integer("completed", { mode: "boolean" }).default(false).notNull()
+})
+```
+
+## Verification Steps
+
+Before starting development, verify your installation:
+
+<Steps>
+  <Step title="Check TypeScript">
+    Run the type checker:
+    
+    ```bash
+    pnpm typecheck
+    ```
+    
+    You should see no errors. If you do, make sure all dependencies are installed correctly.
+  </Step>
+
+  <Step title="Verify Database Connection">
+    Test the database connection by starting the dev server and checking for errors:
+    
+    ```bash
+    pnpm dev
+    ```
+    
+    Look for successful startup messages. No database connection errors should appear.
+  </Step>
+
+  <Step title="Test ORPC Health Check">
+    Visit the health check endpoint:
+    
+    ```bash
+    curl http://localhost:3000/rpc/healthCheck
+    ```
+    
+    You should see: `"OK"`
+  </Step>
+
+  <Step title="Verify Better Auth">
+    Check that the auth endpoint is responding:
+    
+    ```bash
+    curl http://localhost:3000/api/auth/session
+    ```
+    
+    You should see a JSON response (likely null for no session, which is expected).
+  </Step>
+</Steps>
+
+## Available Scripts
+
+Your `package.json` includes these helpful scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "next dev --turbopack --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "biome check && pnpm run typecheck",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "db:local": "turso dev --db-file local.db",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+```
+
+### Script Descriptions
+
+<ParamField path="dev" type="command">
+  Start the development server with Turbopack on port 3000
+  
+  **Hot reload**: Automatically reloads on file changes
+  
+  **Type updates**: ORPC types update instantly when you change procedures
+</ParamField>
+
+<ParamField path="build" type="command">
+  Create an optimized production build
+  
+  Run this before deploying to verify there are no build errors
+</ParamField>
+
+<ParamField path="start" type="command">
+  Start the production server (after building)
+  
+  Use this to test the production build locally
+</ParamField>
+
+<ParamField path="lint" type="command">
+  Run Biome linter and TypeScript type checker
+  
+  Checks for code quality issues and type errors
+</ParamField>
+
+<ParamField path="format" type="command">
+  Format code with Biome
+  
+  Automatically fixes formatting issues
+</ParamField>
+
+<ParamField path="db:local" type="command">
+  Start local SQLite database server
+  
+  Keep this running in a separate terminal during development
+</ParamField>
+
+<ParamField path="db:push" type="command">
+  Push schema changes to database
+  
+  Use this to apply schema changes without creating migration files
+</ParamField>
+
+<ParamField path="db:studio" type="command">
+  Open Drizzle Studio
+  
+  Visual database browser and query tool
+</ParamField>
+
+<ParamField path="db:generate" type="command">
+  Generate migration files
+  
+  Creates SQL migration files from schema changes
+</ParamField>
+
+<ParamField path="db:migrate" type="command">
+  Run migrations
+  
+  Applies migration files to the database
+</ParamField>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="pnpm install fails">
+    **Solution 1**: Clear pnpm cache
+    ```bash
+    pnpm store prune
+    pnpm install
+    ```
+    
+    **Solution 2**: Delete lock file and node_modules
+    ```bash
+    rm -rf node_modules pnpm-lock.yaml
+    pnpm install
+    ```
+    
+    **Solution 3**: Check Node.js version
+    ```bash
+    node --version  # Should be 20.0.0 or higher
+    ```
+  </Accordion>
+  
+  <Accordion title="Database connection errors">
+    Make sure:
+    1. The `db:local` command is running
+    2. `DATABASE_URL` in `.env` is correct
+    3. You have write permissions in the project directory
+    4. No other process is using the database file
+    
+    Try recreating the database:
+    ```bash
+    rm local.db
+    pnpm db:local
+    # In another terminal:
+    pnpm db:push
+    ```
+  </Accordion>
+  
+  <Accordion title="Type errors in editor">
+    1. Restart your TypeScript server (VS Code: Cmd+Shift+P → "TypeScript: Restart TS Server")
+    2. Make sure `src/routers/index.ts` exports `AppRouter` type
+    3. Check that ORPC client imports match your router structure
+    4. Run `pnpm typecheck` to see all type errors
+  </Accordion>
+  
+  <Accordion title="Port already in use">
+    Change the port in `package.json`:
+    ```json
+    "dev": "next dev --turbopack --port 3001"
+    ```
+    
+    Update `.env`:
+    ```bash
+    NEXT_PUBLIC_SERVER_URL=http://localhost:3001
+    ```
+  </Accordion>
+  
+  <Accordion title="Biome formatting conflicts with other formatters">
+    Disable other formatters (Prettier, ESLint) in your editor settings.
+    
+    For VS Code, add to `.vscode/settings.json`:
+    ```json
+    {
+      "editor.defaultFormatter": "biomejs.biome",
+      "editor.formatOnSave": true
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Your installation is complete! Here's what to do next:
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Follow the quickstart guide to build your first feature
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/core/authentication">
+    Learn how ORPC and Better Auth work
+  </Card>
+  
+  <Card title="Database Setup" icon="database" href="/guides/database-setup">
+    Set up your database with Drizzle and Turso
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore available procedures and types
+  </Card>
+</CardGroup>

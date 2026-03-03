@@ -1,0 +1,248 @@
+---
+title: Authentication
+description: Learn how Better Auth is integrated for secure email/password authentication and session management
+---
+
+## Overview
+
+This starter template uses [Better Auth](https://better-auth.com) to provide a secure, type-safe authentication system. Better Auth handles user registration, login, session management, and integrates seamlessly with the database through Drizzle ORM.
+
+## Better Auth Configuration
+
+The authentication system is configured in `src/lib/auth.ts`:
+
+```typescript
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { db } from "../db"
+import * as schema from "../db/schema/auth"
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "sqlite",
+    schema: schema
+  }),
+  trustedOrigins: [process.env.CORS_ORIGIN || ""],
+  emailAndPassword: {
+    enabled: true
+  },
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL
+})
+```
+
+### Key Configuration Options
+
+- **database**: Uses the Drizzle adapter to connect Better Auth with your SQLite database
+- **trustedOrigins**: Configures CORS for secure cross-origin requests
+- **emailAndPassword**: Enables email/password authentication strategy
+- **secret**: Signs and encrypts tokens (set via `BETTER_AUTH_SECRET` environment variable)
+- **baseURL**: The base URL for auth callbacks (set via `BETTER_AUTH_URL`)
+
+<Note>
+Make sure to set `BETTER_AUTH_SECRET` to a strong random string in production. You can generate one using `openssl rand -base64 32`.
+</Note>
+
+## Database Schema
+
+Better Auth requires specific database tables to store users, sessions, accounts, and verification tokens. The schema is defined in `src/db/schema/auth.ts`:
+
+### User Table
+
+```typescript
+export const user = sqliteTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: integer("email_verified", { mode: "boolean" }).notNull(),
+  image: text("image"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
+})
+```
+
+### Session Table
+
+```typescript
+export const session = sqliteTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id)
+})
+```
+
+The session table tracks active user sessions with expiration times, tokens, and metadata like IP address and user agent for security purposes.
+
+### Account Table
+
+```typescript
+export const account = sqliteTable("account", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  providerId: text("provider_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  idToken: text("id_token"),
+  accessTokenExpiresAt: integer("access_token_expires_at", {
+    mode: "timestamp"
+  }),
+  refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+    mode: "timestamp"
+  }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
+})
+```
+
+The account table stores authentication provider details, including encrypted passwords for email/password authentication and OAuth tokens for social providers.
+
+### Verification Table
+
+```typescript
+export const verification = sqliteTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+})
+```
+
+This table stores temporary verification tokens for email verification and password reset flows.
+
+## Auth API Endpoints
+
+Better Auth exposes authentication endpoints through a Next.js API route at `src/app/api/auth/[...all]/route.ts`:
+
+```typescript
+import { toNextJsHandler } from "better-auth/next-js"
+import { auth } from "@/lib/auth"
+
+export const { GET, POST } = toNextJsHandler(auth.handler)
+```
+
+This catch-all route handles all authentication requests:
+
+- `POST /api/auth/sign-up/email` - Register a new user
+- `POST /api/auth/sign-in/email` - Sign in with email/password
+- `POST /api/auth/sign-out` - Sign out the current user
+- `GET /api/auth/session` - Get the current session
+- And more...
+
+<Tip>
+Better Auth automatically handles password hashing, session token generation, CSRF protection, and other security best practices.
+</Tip>
+
+## Client-Side Authentication
+
+The client-side authentication is configured in `src/lib/auth-client.ts`:
+
+```typescript
+import { createAuthClient } from "better-auth/react"
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_SERVER_URL
+})
+```
+
+This creates a React-friendly client that provides hooks and utilities for authentication in your Next.js components.
+
+### Using Auth Client in Components
+
+The auth client provides methods to interact with the authentication system:
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+// Sign up a new user
+await authClient.signUp.email({
+  email: "user@example.com",
+  password: "secure-password",
+  name: "John Doe"
+})
+
+// Sign in
+await authClient.signIn.email({
+  email: "user@example.com",
+  password: "secure-password"
+})
+
+// Sign out
+await authClient.signOut()
+
+// Get current session
+const session = await authClient.getSession()
+```
+
+## Session Management
+
+Sessions are automatically managed by Better Auth:
+
+1. When a user signs in, Better Auth creates a session record in the database
+2. A secure session token is stored in an HTTP-only cookie
+3. The session token is validated on each request
+4. Sessions expire based on the configured timeout
+5. On sign out, the session is invalidated
+
+### Accessing Session Data
+
+Session data is available in your ORPC procedures through the context. See the [Context](/core/context) documentation for details on how session information flows through your API.
+
+```typescript
+export const protectedProcedure = publicProcedure
+  .use(requireAuth)
+  .handler(async ({ context }) => {
+    // context.session.user is guaranteed to exist here
+    const userId = context.session.user.id
+    const userEmail = context.session.user.email
+    // ...
+  })
+```
+
+## Security Features
+
+Better Auth includes several security features out of the box:
+
+- **Password Hashing**: Passwords are hashed using bcrypt before storage
+- **CSRF Protection**: Cross-site request forgery protection for state-changing operations
+- **Secure Cookies**: Session tokens are stored in HTTP-only, secure cookies
+- **Token Expiration**: Sessions automatically expire and require re-authentication
+- **Rate Limiting**: Built-in protection against brute force attacks
+- **Email Verification**: Support for verifying user email addresses
+
+<Note>
+Always use HTTPS in production to ensure session tokens and credentials are transmitted securely.
+</Note>
+
+## Environment Variables
+
+Make sure to configure these environment variables:
+
+```bash
+# Server-side
+BETTER_AUTH_SECRET=your-secret-key-here
+BETTER_AUTH_URL=http://localhost:3000
+CORS_ORIGIN=http://localhost:3000
+
+# Client-side
+NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+```
+
+## Next Steps
+
+- Learn how to create [Protected Procedures](/core/procedures) that require authentication
+- Understand how [Context](/core/context) passes session data to your handlers
+- Explore [Middleware](/core/middleware) to customize authentication behavior

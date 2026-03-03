@@ -1,0 +1,421 @@
+---
+title: Middleware
+description: Learn how to use and create ORPC middleware for authentication, validation, and cross-cutting concerns
+---
+
+## What is Middleware?
+
+Middleware in ORPC are functions that run before your procedure handlers. They can:
+
+- Check authentication and authorization
+- Transform or enrich the context
+- Log requests and responses
+- Validate preconditions
+- Handle rate limiting
+- Add caching
+- Implement any cross-cutting concern
+
+Middleware can either continue to the next middleware/handler or short-circuit by throwing an error.
+
+## The requireAuth Middleware
+
+The most common middleware in this template is `requireAuth`, defined in `src/lib/orpc.ts`:
+
+```typescript
+import { ORPCError, os } from "@orpc/server"
+import type { Context } from "./context"
+
+export const o = os.$context<Context>()
+
+export const requireAuth = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED")
+  }
+  return next({
+    context: {
+      session: context.session
+    }
+  })
+})
+```
+
+### How It Works
+
+1. **Receives Context**: The middleware gets the current request context
+2. **Checks Session**: Verifies that `context.session.user` exists
+3. **Throws Error**: If no session, throws an `UNAUTHORIZED` error
+4. **Calls Next**: If authenticated, calls `next()` to continue
+5. **Transforms Context**: Returns a refined context where session is guaranteed to exist
+
+### Using requireAuth
+
+The middleware is applied to create protected procedures:
+
+```typescript
+export const protectedProcedure = publicProcedure.use(requireAuth)
+```
+
+Now any procedure built with `protectedProcedure` requires authentication:
+
+```typescript
+import { protectedProcedure } from "../lib/orpc"
+
+export const todoRouter = {
+  getAll: protectedProcedure.handler(async ({ context }) => {
+    // context.session.user is guaranteed to exist
+    const userId = context.session.user.id
+    return await db.select().from(todo).where(eq(todo.userId, userId))
+  })
+}
+```
+
+<Tip>
+Because `requireAuth` refines the context type, TypeScript knows that `context.session` is not null in protected procedures.
+</Tip>
+
+## Middleware Structure
+
+A middleware function receives an object with:
+
+- **`context`**: The current request context
+- **`input`**: The validated input (if defined)
+- **`next`**: A function to continue to the next middleware/handler
+
+```typescript
+const myMiddleware = o.middleware(async ({ context, next }) => {
+  // Your logic before the handler
+  
+  const result = await next({
+    context: {
+      // Optionally transform context
+    }
+  })
+  
+  // Your logic after the handler
+  return result
+})
+```
+
+## Context Transformation
+
+Middleware can transform the context for downstream procedures:
+
+### Adding Data to Context
+
+```typescript
+const addTimestamp = o.middleware(async ({ context, next }) => {
+  return next({
+    context: {
+      ...context, // Spread existing context
+      timestamp: new Date() // Add new field
+    }
+  })
+})
+
+const timestampedProcedure = publicProcedure.use(addTimestamp)
+
+timestampedProcedure.handler(async ({ context }) => {
+  console.log(`Request at ${context.timestamp}`)
+  // context.timestamp is available
+})
+```
+
+### Refining Context Types
+
+The `requireAuth` middleware refines the context by making the session non-nullable:
+
+```typescript
+// Before middleware: context.session is Session | null
+// After middleware: context.session is Session
+
+return next({
+  context: {
+    session: context.session // TypeScript now knows this exists
+  }
+})
+```
+
+This provides type-level guarantees in your handlers.
+
+## Error Handling
+
+Middleware can throw errors to prevent handler execution:
+
+### Using ORPCError
+
+```typescript
+import { ORPCError } from "@orpc/server"
+
+const requireAdmin = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED")
+  }
+  
+  const user = await db.query.user.findFirst({
+    where: eq(user.id, context.session.user.id)
+  })
+  
+  if (user?.role !== "admin") {
+    throw new ORPCError("FORBIDDEN", {
+      message: "Admin access required"
+    })
+  }
+  
+  return next({
+    context: {
+      session: context.session,
+      user
+    }
+  })
+})
+```
+
+### Common Error Codes
+
+- **`UNAUTHORIZED`**: User not authenticated (401)
+- **`FORBIDDEN`**: User lacks permissions (403)
+- **`BAD_REQUEST`**: Invalid request (400)
+- **`NOT_FOUND`**: Resource not found (404)
+- **`INTERNAL_SERVER_ERROR`**: Server error (500)
+- **`TOO_MANY_REQUESTS`**: Rate limit exceeded (429)
+
+<Note>
+When middleware throws an error, the procedure handler never executes, and the error is returned to the client.
+</Note>
+
+## Creating Custom Middleware
+
+You can create custom middleware for various purposes:
+
+### Logging Middleware
+
+```typescript
+const logger = o.middleware(async ({ context, next }) => {
+  const start = Date.now()
+  
+  console.log(`Request started`, {
+    userId: context.session?.user.id,
+    timestamp: new Date()
+  })
+  
+  try {
+    const result = await next({})
+    
+    console.log(`Request completed`, {
+      duration: Date.now() - start
+    })
+    
+    return result
+  } catch (error) {
+    console.error(`Request failed`, {
+      duration: Date.now() - start,
+      error
+    })
+    throw error
+  }
+})
+
+const loggedProcedure = publicProcedure.use(logger)
+```
+
+### Rate Limiting Middleware
+
+```typescript
+const rateLimit = o.middleware(async ({ context, next }) => {
+  const userId = context.session?.user.id || "anonymous"
+  const key = `rate-limit:${userId}`
+  
+  const requests = await redis.incr(key)
+  
+  if (requests === 1) {
+    await redis.expire(key, 60) // 1 minute window
+  }
+  
+  if (requests > 100) {
+    throw new ORPCError("TOO_MANY_REQUESTS", {
+      message: "Rate limit exceeded. Try again later."
+    })
+  }
+  
+  return next({})
+})
+
+const rateLimitedProcedure = publicProcedure.use(rateLimit)
+```
+
+### Caching Middleware
+
+```typescript
+const cached = (ttlSeconds: number) => {
+  return o.middleware(async ({ context, input, next }) => {
+    const cacheKey = `cache:${JSON.stringify(input)}`
+    
+    // Check cache
+    const cached = await redis.get(cacheKey)
+    if (cached) {
+      return JSON.parse(cached)
+    }
+    
+    // Execute handler
+    const result = await next({})
+    
+    // Store in cache
+    await redis.setex(cacheKey, ttlSeconds, JSON.stringify(result))
+    
+    return result
+  })
+}
+
+const cachedProcedure = publicProcedure.use(cached(300)) // 5 minutes
+```
+
+### Input Validation Middleware
+
+```typescript
+const validateOwnership = o.middleware(async ({ context, input, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED")
+  }
+  
+  // Assuming input has an id field
+  const todo = await db.query.todo.findFirst({
+    where: eq(todo.id, input.id)
+  })
+  
+  if (!todo) {
+    throw new ORPCError("NOT_FOUND")
+  }
+  
+  if (todo.userId !== context.session.user.id) {
+    throw new ORPCError("FORBIDDEN", {
+      message: "You don't own this resource"
+    })
+  }
+  
+  return next({
+    context: {
+      ...context,
+      todo // Add verified todo to context
+    }
+  })
+})
+```
+
+## Middleware Chaining
+
+You can chain multiple middleware together:
+
+```typescript
+const myProcedure = publicProcedure
+  .use(logger)           // First: log request
+  .use(rateLimit)        // Second: check rate limit
+  .use(requireAuth)      // Third: check authentication
+  .use(validateOwnership) // Fourth: validate ownership
+
+myProcedure
+  .input(z.object({ id: z.number() }))
+  .handler(async ({ context, input }) => {
+    // All middleware passed
+    // context.todo is available from validateOwnership
+    return context.todo
+  })
+```
+
+Middleware runs in order:
+1. `logger` starts timing
+2. `rateLimit` checks request count
+3. `requireAuth` verifies authentication
+4. `validateOwnership` checks resource ownership
+5. Handler executes
+6. `logger` logs completion
+
+<Tip>
+Order matters! Place authentication middleware before authorization middleware, and place logging middleware first to capture all requests.
+</Tip>
+
+## Reusable Middleware Patterns
+
+### Creating Base Procedures
+
+Define commonly used middleware stacks:
+
+```typescript
+// Public with logging
+export const publicProcedure = o.use(logger)
+
+// Protected with logging and rate limiting
+export const protectedProcedure = publicProcedure
+  .use(rateLimit)
+  .use(requireAuth)
+
+// Admin only
+export const adminProcedure = protectedProcedure
+  .use(requireAdmin)
+
+// Cached public endpoint
+export const cachedPublicProcedure = publicProcedure
+  .use(cached(300))
+```
+
+Now you can use these throughout your routers:
+
+```typescript
+export const todoRouter = {
+  getAll: protectedProcedure.handler(async ({ context }) => {
+    // Logged, rate-limited, and authenticated
+  }),
+  
+  getPublicStats: cachedPublicProcedure.handler(async () => {
+    // Logged and cached for 5 minutes
+  }),
+  
+  deleteAllTodos: adminProcedure.handler(async () => {
+    // Logged, rate-limited, authenticated, and admin-only
+  })
+}
+```
+
+## Best Practices
+
+1. **Keep Middleware Focused**: Each middleware should do one thing well
+2. **Order Matters**: Place cheaper checks (like auth) before expensive ones (like database queries)
+3. **Transform Context Carefully**: Only add what's needed downstream
+4. **Use Appropriate Errors**: Choose the right `ORPCError` code for the situation
+5. **Document Custom Middleware**: Explain what context fields are added
+6. **Avoid Side Effects**: Middleware should be predictable and testable
+7. **Handle Errors Gracefully**: Always clean up resources if middleware fails
+8. **Type Context Transformations**: Let TypeScript track context changes
+
+## Middleware vs Input Validation
+
+**Use Middleware for:**
+- Authentication and authorization
+- Request/response logging
+- Rate limiting
+- Caching
+- Context enrichment
+- Cross-cutting concerns
+
+**Use Input Validation (`.input()`) for:**
+- Validating user-provided data
+- Type checking parameters
+- Business rule validation
+- Schema enforcement
+
+```typescript
+// Good: Authentication in middleware
+const protectedProcedure = publicProcedure.use(requireAuth)
+
+// Good: Data validation in input
+protectedProcedure
+  .input(z.object({ text: z.string().min(1) }))
+  .handler(async ({ input }) => {
+    // input.text is validated
+  })
+```
+
+## Next Steps
+
+- Learn how [Context](/core/context) flows through middleware
+- Explore [Procedures](/core/procedures) to see how middleware enhances them
+- Understand [Authentication](/core/authentication) to see how sessions are managed

@@ -1,0 +1,403 @@
+---
+title: "Todo Router"
+description: "API reference for todo management endpoints"
+---
+
+## Overview
+
+The Todo router provides CRUD operations for managing todo items. All endpoints are defined in `src/routers/todo.ts`.
+
+## Database Schema
+
+Todos are stored with the following schema:
+
+```typescript
+export const todo = sqliteTable("todo", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  completed: integer("completed", { mode: "boolean" }).default(false).notNull()
+})
+```
+
+## Endpoints
+
+### todo.getAll
+
+Retrieves all todos from the database.
+
+<Note>
+  This is a **protected procedure** - requires authentication.
+</Note>
+
+#### Input
+
+No input parameters required.
+
+#### Response
+
+<ResponseField name="todos" type="array">
+  Array of todo objects
+  
+  <Expandable title="Todo object">
+    <ResponseField name="id" type="number">
+      Auto-incrementing unique identifier
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      The todo item text
+    </ResponseField>
+    
+    <ResponseField name="completed" type="boolean">
+      Whether the todo is completed
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Implementation
+
+```typescript
+getAll: protectedProcedure.handler(async () => {
+  return await db.select().from(todo)
+})
+```
+
+#### Example Usage
+
+```typescript
+import { orpc } from "@/utils/orpc"
+
+// Using React Query
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+
+// Direct call
+const todos = await orpc.todo.getAll.query()
+```
+
+#### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "text": "Buy groceries",
+    "completed": false
+  },
+  {
+    "id": 2,
+    "text": "Write documentation",
+    "completed": true
+  }
+]
+```
+
+---
+
+### todo.create
+
+Creates a new todo item.
+
+<Note>
+  This is a **public procedure** - no authentication required.
+</Note>
+
+#### Input
+
+<ParamField path="text" type="string" required>
+  The text of the todo item. Must be at least 1 character long.
+</ParamField>
+
+#### Response
+
+Returns the result of the database insert operation (Drizzle insert result).
+
+#### Implementation
+
+```typescript
+create: publicProcedure
+  .input(z.object({ text: z.string().min(1) }))
+  .handler(async ({ input }) => {
+    return await db.insert(todo).values({
+      text: input.text
+    })
+  })
+```
+
+#### Validation
+
+- `text` must be a string
+- `text` must have at least 1 character
+- Returns validation error if input is invalid
+
+#### Example Usage
+
+```typescript
+import { orpc } from "@/utils/orpc"
+
+// Using React Query mutation
+const createMutation = useMutation(
+  orpc.todo.create.mutationOptions({
+    onSuccess: () => {
+      console.log("Todo created!")
+    }
+  })
+)
+
+createMutation.mutate({ text: "Buy groceries" })
+
+// Direct call
+await orpc.todo.create.mutate({ text: "Buy groceries" })
+```
+
+#### Example Request
+
+```json
+{
+  "text": "Buy groceries"
+}
+```
+
+---
+
+### todo.toggle
+
+Toggles the completion status of a todo item.
+
+<Note>
+  This is a **public procedure** - no authentication required.
+</Note>
+
+#### Input
+
+<ParamField path="id" type="number" required>
+  The ID of the todo to update
+</ParamField>
+
+<ParamField path="completed" type="boolean" required>
+  The new completion status
+</ParamField>
+
+#### Response
+
+Returns the result of the database update operation (Drizzle update result).
+
+#### Implementation
+
+```typescript
+toggle: publicProcedure
+  .input(z.object({ id: z.number(), completed: z.boolean() }))
+  .handler(async ({ input }) => {
+    return await db
+      .update(todo)
+      .set({ completed: input.completed })
+      .where(eq(todo.id, input.id))
+  })
+```
+
+#### Example Usage
+
+```typescript
+import { orpc } from "@/utils/orpc"
+
+// Toggle a todo's completion status
+const toggleMutation = useMutation(
+  orpc.todo.toggle.mutationOptions({
+    onSuccess: () => {
+      console.log("Todo toggled!")
+    }
+  })
+)
+
+// Mark todo #1 as completed
+toggleMutation.mutate({ id: 1, completed: true })
+
+// Mark todo #1 as incomplete
+toggleMutation.mutate({ id: 1, completed: false })
+```
+
+#### Example Request
+
+```json
+{
+  "id": 1,
+  "completed": true
+}
+```
+
+---
+
+### todo.delete
+
+Deletes a todo item from the database.
+
+<Note>
+  This is a **public procedure** - no authentication required.
+</Note>
+
+#### Input
+
+<ParamField path="id" type="number" required>
+  The ID of the todo to delete
+</ParamField>
+
+#### Response
+
+Returns the result of the database delete operation (Drizzle delete result).
+
+#### Implementation
+
+```typescript
+delete: publicProcedure
+  .input(z.object({ id: z.number() }))
+  .handler(async ({ input }) => {
+    return await db.delete(todo).where(eq(todo.id, input.id))
+  })
+```
+
+#### Example Usage
+
+```typescript
+import { orpc } from "@/utils/orpc"
+
+// Using React Query mutation
+const deleteMutation = useMutation(
+  orpc.todo.delete.mutationOptions({
+    onSuccess: () => {
+      console.log("Todo deleted!")
+    }
+  })
+)
+
+// Delete todo #1
+deleteMutation.mutate({ id: 1 })
+
+// Direct call
+await orpc.todo.delete.mutate({ id: 1 })
+```
+
+#### Example Request
+
+```json
+{
+  "id": 1
+}
+```
+
+---
+
+## Complete Example
+
+Here's a complete React component using all todo endpoints:
+
+```typescript
+"use client"
+
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { useState } from "react"
+import { orpc } from "@/utils/orpc"
+
+export default function TodosPage() {
+  const [newTodoText, setNewTodoText] = useState("")
+
+  // Fetch all todos
+  const todos = useQuery(orpc.todo.getAll.queryOptions())
+
+  // Create mutation
+  const createMutation = useMutation(
+    orpc.todo.create.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+        setNewTodoText("")
+      }
+    })
+  )
+
+  // Toggle mutation
+  const toggleMutation = useMutation(
+    orpc.todo.toggle.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+      }
+    })
+  )
+
+  // Delete mutation
+  const deleteMutation = useMutation(
+    orpc.todo.delete.mutationOptions({
+      onSuccess: () => {
+        todos.refetch()
+      }
+    })
+  )
+
+  const handleAddTodo = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newTodoText.trim()) {
+      createMutation.mutate({ text: newTodoText })
+    }
+  }
+
+  const handleToggleTodo = (id: number, completed: boolean) => {
+    toggleMutation.mutate({ id, completed: !completed })
+  }
+
+  const handleDeleteTodo = (id: number) => {
+    deleteMutation.mutate({ id })
+  }
+
+  return (
+    <div>
+      <h1>Todo List</h1>
+      
+      <form onSubmit={handleAddTodo}>
+        <input
+          value={newTodoText}
+          onChange={(e) => setNewTodoText(e.target.value)}
+          placeholder="Add a new task..."
+        />
+        <button type="submit">Add</button>
+      </form>
+
+      {todos.isLoading ? (
+        <div>Loading...</div>
+      ) : (
+        <ul>
+          {todos.data?.map((todo) => (
+            <li key={todo.id}>
+              <input
+                type="checkbox"
+                checked={todo.completed}
+                onChange={() => handleToggleTodo(todo.id, todo.completed)}
+              />
+              <span>{todo.text}</span>
+              <button onClick={() => handleDeleteTodo(todo.id)}>
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+```
+
+## Type Safety
+
+All endpoints benefit from full type safety:
+
+```typescript
+// ✅ Valid - TypeScript knows the shape
+await orpc.todo.create.mutate({ text: "Buy milk" })
+
+// ❌ Error - TypeScript catches missing required field
+await orpc.todo.create.mutate({})
+
+// ❌ Error - TypeScript catches wrong field name
+await orpc.todo.create.mutate({ title: "Buy milk" })
+
+// ✅ Valid - correct types
+await orpc.todo.toggle.mutate({ id: 1, completed: true })
+
+// ❌ Error - wrong type for 'completed'
+await orpc.todo.toggle.mutate({ id: 1, completed: "yes" })
+```

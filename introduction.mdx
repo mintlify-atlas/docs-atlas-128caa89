@@ -1,0 +1,148 @@
+---
+title: Introduction
+description: A modern Next.js starter template combining ORPC's type-safe RPC framework with Better Auth for secure authentication
+---
+
+# ORPC + Better Auth Starter
+
+A production-ready Next.js template that brings together the best of type-safe backend development and modern authentication. Build full-stack applications with end-to-end type safety, protected API routes, and seamless user authentication out of the box.
+
+## What is This?
+
+This starter template combines **ORPC** (OpenAPI RPC) with **Better Auth** to provide a complete authentication and API solution for Next.js applications. It eliminates the complexity of setting up type-safe APIs and authentication from scratch, letting you focus on building features.
+
+### ORPC
+
+ORPC is a type-safe RPC framework that provides automatic type inference between your frontend and backend. Define your API once, get full TypeScript support everywhere.
+
+### Better Auth
+
+Better Auth is a modern authentication library designed for TypeScript applications. It provides a simple, secure way to add email/password authentication with built-in session management.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="End-to-End Type Safety" icon="shield-check">
+    Full TypeScript inference from backend to frontend. Change your API schema and get instant feedback in your client code.
+  </Card>
+  
+  <Card title="Protected Procedures" icon="lock">
+    Built-in middleware system for authentication. Create public and protected API endpoints with a simple decorator pattern.
+  </Card>
+  
+  <Card title="Better Auth Integration" icon="user-shield">
+    Email and password authentication out of the box. Session management, secure password hashing, and Drizzle ORM integration included.
+  </Card>
+  
+  <Card title="React Query Integration" icon="rotate">
+    Seamless integration with TanStack Query. Automatic hooks generation, optimistic updates, and error handling.
+  </Card>
+  
+  <Card title="Database Ready" icon="database">
+    Pre-configured Drizzle ORM with SQLite/Turso support. Type-safe database queries with automatic migrations.
+  </Card>
+  
+  <Card title="Modern Stack" icon="rocket">
+    Next.js 15, React 19, TypeScript, Tailwind CSS, and shadcn/ui components. Everything you need for modern web development.
+  </Card>
+</CardGroup>
+
+## Quick Example
+
+Define a protected procedure on your backend:
+
+```typescript src/routers/todo.ts
+import { protectedProcedure } from "../lib/orpc"
+import { db } from "../db"
+import { todo } from "../db/schema/todo"
+
+export const todoRouter = {
+  getAll: protectedProcedure.handler(async () => {
+    return await db.select().from(todo)
+  })
+}
+```
+
+Call it from your frontend with full type safety:
+
+```typescript src/app/todos/page.tsx
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/utils/orpc"
+
+export default function TodosPage() {
+  const todos = useQuery(orpc.todo.getAll.queryOptions())
+  
+  // todos.data is fully typed!
+  return (
+    <ul>
+      {todos.data?.map(todo => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+## Why Use This Template?
+
+### Type Safety That Actually Works
+
+Traditional REST APIs require manual type definitions, Swagger specifications, or code generation. ORPC provides automatic type inference - change your backend, and your frontend immediately knows about it.
+
+### Authentication Without the Headache
+
+Better Auth handles the complex parts of authentication: secure password hashing, session management, CSRF protection, and database integration. You get security best practices by default.
+
+### Real-Time Development Experience
+
+With Next.js Turbopack, ORPC's type system, and React Query's dev tools, you get instant feedback on API changes, type errors, and data flow.
+
+### Production Ready
+
+- **Security**: Better Auth's built-in CSRF protection and secure session management
+- **Performance**: React Query's intelligent caching and background updates
+- **Developer Experience**: Biome for fast linting and formatting
+- **Database**: Drizzle ORM with type-safe migrations
+
+## Get Started
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed installation and configuration guide
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/core/authentication">
+    Understand how ORPC and Better Auth work together
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+- **Framework**: Next.js 15 with App Router
+- **Runtime**: React 19
+- **RPC**: ORPC 1.5 with TanStack Query integration
+- **Authentication**: Better Auth 1.3
+- **Database**: Drizzle ORM with SQLite/Turso
+- **Styling**: Tailwind CSS 4 with shadcn/ui components
+- **TypeScript**: Full type safety throughout
+- **Dev Tools**: Biome for linting and formatting
+
+## What's Included
+
+- Full authentication flow with sign up and login pages
+- Example todo CRUD application demonstrating protected procedures
+- Pre-configured database schema for auth and todos
+- ORPC router setup with public and protected procedures
+- React Query integration with error handling
+- Dark mode support with next-themes
+- Responsive UI components from shadcn/ui
+
+## Community and Support
+
+- **ORPC Documentation**: [orpc.dev](https://orpc.dev)
+- **Better Auth Documentation**: [better-auth.com](https://better-auth.com)
+- **Next.js Documentation**: [nextjs.org/docs](https://nextjs.org/docs)

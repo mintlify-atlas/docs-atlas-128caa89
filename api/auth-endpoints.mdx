@@ -1,0 +1,551 @@
+---
+title: "Authentication Endpoints"
+description: "Better Auth integration and authentication flow"
+---
+
+## Overview
+
+This project uses [Better Auth](https://better-auth.com) for authentication. Better Auth provides a comprehensive set of authentication endpoints through a single handler.
+
+## Better Auth Handler
+
+The authentication handler is configured in `src/app/api/auth/[...all]/route.ts`:
+
+```typescript
+import { toNextJsHandler } from "better-auth/next-js"
+import { auth } from "@/lib/auth"
+
+export const { GET, POST } = toNextJsHandler(auth.handler)
+```
+
+This creates a catch-all route that handles all authentication-related requests under `/api/auth/*`.
+
+## Auth Configuration
+
+Better Auth is configured in `src/lib/auth.ts`:
+
+```typescript
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { db } from "../db"
+import * as schema from "../db/schema/auth"
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "sqlite",
+    schema: schema
+  }),
+  trustedOrigins: [process.env.CORS_ORIGIN || ""],
+  emailAndPassword: {
+    enabled: true
+  },
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL
+})
+```
+
+Key features:
+- **Database**: Uses Drizzle ORM with SQLite
+- **Auth Method**: Email and password authentication
+- **CORS**: Configurable trusted origins
+- **Security**: Secret key for JWT signing
+
+## Available Endpoints
+
+Better Auth automatically provides these endpoints:
+
+### Sign Up
+
+**POST** `/api/auth/sign-up/email`
+
+Creates a new user account with email and password.
+
+<ParamField body="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password (will be hashed)
+</ParamField>
+
+<ParamField body="name" type="string">
+  User's display name (optional)
+</ParamField>
+
+#### Example Request
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+const { data, error } = await authClient.signUp.email({
+  email: "user@example.com",
+  password: "securePassword123",
+  name: "John Doe"
+})
+
+if (error) {
+  console.error("Sign up failed:", error.message)
+} else {
+  console.log("User created:", data.user)
+}
+```
+
+---
+
+### Sign In
+
+**POST** `/api/auth/sign-in/email`
+
+Authenticates a user with email and password.
+
+<ParamField body="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password
+</ParamField>
+
+#### Response
+
+<ResponseField name="user" type="object">
+  The authenticated user object
+  
+  <Expandable title="User object">
+    <ResponseField name="id" type="string">
+      Unique user identifier
+    </ResponseField>
+    
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      User's display name
+    </ResponseField>
+    
+    <ResponseField name="emailVerified" type="boolean">
+      Whether the email has been verified
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="session" type="object">
+  The created session
+  
+  <Expandable title="Session object">
+    <ResponseField name="token" type="string">
+      Session token
+    </ResponseField>
+    
+    <ResponseField name="expiresAt" type="number">
+      Session expiration timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Example Request
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+const { data, error } = await authClient.signIn.email({
+  email: "user@example.com",
+  password: "securePassword123"
+})
+
+if (error) {
+  console.error("Sign in failed:", error.message)
+} else {
+  console.log("Logged in as:", data.user.email)
+}
+```
+
+---
+
+### Sign Out
+
+**POST** `/api/auth/sign-out`
+
+Ends the current user session.
+
+#### Example Request
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+await authClient.signOut()
+```
+
+---
+
+### Get Session
+
+**GET** `/api/auth/get-session`
+
+Retrieves the current authenticated session.
+
+#### Response
+
+<ResponseField name="session" type="object | null">
+  The current session if authenticated, null otherwise
+  
+  <Expandable title="Session object">
+    <ResponseField name="user" type="object">
+      The authenticated user
+    </ResponseField>
+    
+    <ResponseField name="token" type="string">
+      Session token
+    </ResponseField>
+    
+    <ResponseField name="expiresAt" type="number">
+      Session expiration timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Example Request
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+// Using React hook (recommended)
+const { data: session, isPending } = authClient.useSession()
+
+if (isPending) {
+  return <div>Loading...</div>
+}
+
+if (session) {
+  console.log("Logged in as:", session.user.email)
+} else {
+  console.log("Not authenticated")
+}
+
+// Direct API call
+const session = await auth.api.getSession({
+  headers: req.headers
+})
+```
+
+---
+
+## Auth Client Setup
+
+The client-side auth utilities are configured in `src/lib/auth-client.ts`:
+
+```typescript
+import { createAuthClient } from "better-auth/react"
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_SERVER_URL
+})
+```
+
+This provides React hooks and client methods for authentication.
+
+## Integration with ORPC
+
+Better Auth integrates seamlessly with ORPC through the context system:
+
+### Server-Side Session Access
+
+```typescript
+// src/lib/context.ts
+import type { NextRequest } from "next/server"
+import { auth } from "./auth"
+
+export async function createContext(req: NextRequest) {
+  const session = await auth.api.getSession({
+    headers: req.headers
+  })
+
+  return {
+    session
+  }
+}
+```
+
+Every RPC request gets the current session in its context.
+
+### Protected Procedures
+
+ORPC procedures can require authentication:
+
+```typescript
+import { ORPCError, os } from "@orpc/server"
+
+export const requireAuth = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED")
+  }
+  return next({
+    context: {
+      session: context.session
+    }
+  })
+})
+
+export const protectedProcedure = publicProcedure.use(requireAuth)
+```
+
+### Using Protected Procedures
+
+```typescript
+export const appRouter = {
+  // Public - anyone can call
+  healthCheck: publicProcedure.handler(() => {
+    return "OK"
+  }),
+  
+  // Protected - requires authentication
+  privateData: protectedProcedure.handler(({ context }) => {
+    return {
+      message: "This is private",
+      user: context.session?.user // Guaranteed to exist
+    }
+  })
+}
+```
+
+## Authentication Flow Example
+
+Here's a complete authentication flow:
+
+### 1. Sign Up
+
+```typescript
+"use client"
+
+import { useState } from "react"
+import { authClient } from "@/lib/auth-client"
+import { useRouter } from "next/navigation"
+
+export default function SignUpForm() {
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [name, setName] = useState("")
+  const router = useRouter()
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    const { data, error } = await authClient.signUp.email({
+      email,
+      password,
+      name
+    })
+
+    if (error) {
+      alert(error.message)
+    } else {
+      router.push("/dashboard")
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name"
+      />
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+      />
+      <button type="submit">Sign Up</button>
+    </form>
+  )
+}
+```
+
+### 2. Sign In
+
+```typescript
+"use client"
+
+import { useState } from "react"
+import { authClient } from "@/lib/auth-client"
+import { useRouter } from "next/navigation"
+
+export default function SignInForm() {
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const router = useRouter()
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    const { data, error } = await authClient.signIn.email({
+      email,
+      password
+    })
+
+    if (error) {
+      alert(error.message)
+    } else {
+      router.push("/dashboard")
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+      />
+      <button type="submit">Sign In</button>
+    </form>
+  )
+}
+```
+
+### 3. Protected Page
+
+```typescript
+"use client"
+
+import { useQuery } from "@tanstack/react-query"
+import { useRouter } from "next/navigation"
+import { useEffect } from "react"
+import { authClient } from "@/lib/auth-client"
+import { orpc } from "@/utils/orpc"
+
+export default function Dashboard() {
+  const router = useRouter()
+  const { data: session, isPending } = authClient.useSession()
+
+  // Call a protected RPC endpoint
+  const privateData = useQuery(orpc.privateData.queryOptions())
+
+  useEffect(() => {
+    if (!session && !isPending) {
+      router.push("/login")
+    }
+  }, [session, isPending])
+
+  if (isPending) {
+    return <div>Loading...</div>
+  }
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome {session?.user.name}</p>
+      <p>Email: {session?.user.email}</p>
+      <p>Private data: {privateData.data?.message}</p>
+      
+      <button onClick={() => authClient.signOut()}>
+        Sign Out
+      </button>
+    </div>
+  )
+}
+```
+
+## Session Checking
+
+### Client-Side
+
+```typescript
+import { authClient } from "@/lib/auth-client"
+
+// React hook (recommended)
+const { data: session, isPending } = authClient.useSession()
+
+if (isPending) {
+  return <div>Loading...</div>
+}
+
+if (session) {
+  console.log("User:", session.user)
+} else {
+  console.log("Not logged in")
+}
+```
+
+### Server-Side (RPC Context)
+
+```typescript
+// In any ORPC procedure
+publicProcedure.handler(({ context }) => {
+  if (context.session) {
+    console.log("Authenticated user:", context.session.user)
+  } else {
+    console.log("Anonymous request")
+  }
+})
+```
+
+### Protected Route Guard
+
+```typescript
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { authClient } from "@/lib/auth-client"
+
+export default function ProtectedPage() {
+  const router = useRouter()
+  const { data: session, isPending } = authClient.useSession()
+
+  useEffect(() => {
+    if (!session && !isPending) {
+      router.push("/login")
+    }
+  }, [session, isPending, router])
+
+  if (isPending) {
+    return <div>Loading...</div>
+  }
+
+  if (!session) {
+    return null // Will redirect
+  }
+
+  return <div>Protected content</div>
+}
+```
+
+## Security Best Practices
+
+1. **Always use HTTPS in production** - Set `BETTER_AUTH_URL` to an HTTPS URL
+2. **Set a strong secret** - Use a random string for `BETTER_AUTH_SECRET`
+3. **Configure CORS properly** - Set `CORS_ORIGIN` to your frontend URL
+4. **Validate inputs** - Better Auth handles this, but validate on your side too
+5. **Use protected procedures** - Wrap sensitive endpoints with `protectedProcedure`
+6. **Check sessions server-side** - Never trust client-side session checks alone
+
+## Environment Variables
+
+Required environment variables:
+
+```bash
+# Better Auth configuration
+BETTER_AUTH_SECRET="your-secret-key-here"
+BETTER_AUTH_URL="http://localhost:3000" # Use HTTPS in production
+CORS_ORIGIN="http://localhost:3000"
+
+# For client-side auth
+NEXT_PUBLIC_SERVER_URL="http://localhost:3000"
+```

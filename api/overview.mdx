@@ -1,0 +1,255 @@
+---
+title: "RPC Overview"
+description: "Understanding how ORPC works in this Next.js + Better Auth starter"
+---
+
+## How RPC Works
+
+This project uses [ORPC](https://orpc.unnoq.com/) for type-safe remote procedure calls between the client and server. ORPC provides end-to-end type safety, ensuring that your API calls are validated at compile time.
+
+## Architecture
+
+### Endpoint Structure
+
+All RPC endpoints are served through a single Next.js route:
+
+```
+/rpc/[...all]
+```
+
+This catch-all route handles all HTTP methods (GET, POST, PUT, PATCH, DELETE) and routes requests to the appropriate procedure handlers.
+
+### App Router
+
+The main router is defined in `src/routers/index.ts`:
+
+```typescript
+import { protectedProcedure, publicProcedure } from "../lib/orpc"
+import { todoRouter } from "./todo"
+
+export const appRouter = {
+  healthCheck: publicProcedure.handler(() => {
+    return "OK"
+  }),
+  privateData: protectedProcedure.handler(({ context }) => {
+    return {
+      message: "This is private",
+      user: context.session?.user
+    }
+  }),
+  todo: todoRouter
+}
+export type AppRouter = typeof appRouter
+```
+
+The router exports its type (`AppRouter`), which is used by the client for type inference.
+
+### RPC Handler Setup
+
+The RPC handler is configured in `src/app/rpc/[...all]/route.ts`:
+
+```typescript
+import { RPCHandler } from "@orpc/server/fetch"
+import { NextRequest } from "next/server"
+import { createContext } from "@/lib/context"
+import { appRouter } from "@/routers"
+
+const handler = new RPCHandler(appRouter)
+
+async function handleRequest(req: NextRequest) {
+  const { response } = await handler.handle(req, {
+    prefix: "/rpc",
+    context: await createContext(req)
+  })
+
+  return response ?? new Response("Not found", { status: 404 })
+}
+
+export const GET = handleRequest
+export const POST = handleRequest
+export const PUT = handleRequest
+export const PATCH = handleRequest
+export const DELETE = handleRequest
+```
+
+Key configuration:
+- **prefix**: `/rpc` - All RPC calls are prefixed with this path
+- **context**: Created per-request, includes session data from Better Auth
+
+### Context Creation
+
+Each request gets a context with the current user's session:
+
+```typescript
+// src/lib/context.ts
+import type { NextRequest } from "next/server"
+import { auth } from "./auth"
+
+export async function createContext(req: NextRequest) {
+  const session = await auth.api.getSession({
+    headers: req.headers
+  })
+
+  return {
+    session
+  }
+}
+
+export type Context = Awaited<ReturnType<typeof createContext>>
+```
+
+## Request/Response Format
+
+ORPC uses a JSON-RPC-like protocol over HTTP. The client automatically handles serialization and deserialization.
+
+### Client Setup
+
+The client is configured in `src/utils/orpc.ts`:
+
+```typescript
+import { createORPCClient } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import { createTanstackQueryUtils } from "@orpc/tanstack-query"
+
+export const link = new RPCLink({
+  url: `${process.env.NEXT_PUBLIC_SERVER_URL}/rpc`,
+  headers: async () => {
+    if (typeof window !== "undefined") {
+      return {}
+    }
+    const { headers } = await import("next/headers")
+    return Object.fromEntries(await headers())
+  },
+  fetch(url, options) {
+    return fetch(url, {
+      ...options,
+      credentials: "include" // Important for session cookies
+    })
+  }
+})
+
+export const client: RouterClient<typeof appRouter> = createORPCClient(link)
+export const orpc = createTanstackQueryUtils(client)
+```
+
+### Example Request
+
+```typescript
+// Create a todo
+await orpc.todo.create.mutate({ text: "Buy groceries" })
+
+// Get all todos
+const todos = await orpc.todo.getAll.query()
+```
+
+## Error Handling
+
+ORPC uses typed errors through `ORPCError`:
+
+```typescript
+import { ORPCError } from "@orpc/server"
+
+// Throwing an error in a procedure
+throw new ORPCError("UNAUTHORIZED")
+```
+
+Common error codes:
+- `UNAUTHORIZED` - User is not authenticated
+- `FORBIDDEN` - User lacks permissions
+- `BAD_REQUEST` - Invalid input
+- `NOT_FOUND` - Resource not found
+- `INTERNAL_SERVER_ERROR` - Server error
+
+### Client-Side Error Handling
+
+Errors are automatically caught and can be handled in React Query:
+
+```typescript
+const todos = useQuery(orpc.todo.getAll.queryOptions())
+
+if (todos.error) {
+  console.error("Failed to fetch todos:", todos.error.message)
+}
+```
+
+Global error handling is configured in the QueryClient:
+
+```typescript
+export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      toast.error(`Error: ${error.message}`, {
+        action: {
+          label: "retry",
+          onClick: () => {
+            queryClient.invalidateQueries()
+          }
+        }
+      })
+    }
+  })
+})
+```
+
+## Type Safety
+
+One of ORPC's key features is end-to-end type safety:
+
+1. **Input Validation**: Zod schemas validate input on the server
+2. **Type Inference**: Client automatically infers types from the router
+3. **Autocompletion**: Full IDE support for all procedures and their inputs/outputs
+4. **Compile-Time Checks**: TypeScript catches mismatches before runtime
+
+### Example
+
+```typescript
+// Server-side procedure definition
+export const todoRouter = {
+  create: publicProcedure
+    .input(z.object({ text: z.string().min(1) }))
+    .handler(async ({ input }) => {
+      return await db.insert(todo).values({
+        text: input.text // TypeScript knows 'text' exists and is a string
+      })
+    })
+}
+
+// Client-side usage
+await orpc.todo.create.mutate({ 
+  text: "Buy milk" // TypeScript enforces this shape
+})
+
+// This would fail at compile time:
+// await orpc.todo.create.mutate({ title: "Buy milk" }) // Error: 'title' does not exist
+```
+
+## Procedures Types
+
+### Public Procedures
+
+Available to all users, authenticated or not:
+
+```typescript
+export const publicProcedure = o
+```
+
+### Protected Procedures
+
+Require authentication via the `requireAuth` middleware:
+
+```typescript
+export const requireAuth = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED")
+  }
+  return next({
+    context: {
+      session: context.session
+    }
+  })
+})
+
+export const protectedProcedure = publicProcedure.use(requireAuth)
+```
+
+Protected procedures automatically have access to the authenticated session in their context.
