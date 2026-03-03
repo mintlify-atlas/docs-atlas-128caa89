@@ -1,0 +1,86 @@
+{
+  "projectType": "general",
+  "projectName": "ORPC + Better Auth",
+  "projectDescription": "A Next.js starter template integrating ORPC for type-safe RPC with Better Auth authentication",
+  "theme": "palm",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4f46e5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core/authentication",
+              "core/procedures",
+              "core/context",
+              "core/middleware"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/database-setup",
+              "guides/environment-variables",
+              "guides/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "RPC Endpoints",
+            "pages": [
+              "api/overview",
+              "api/todo-router",
+              "api/auth-endpoints"
+            ]
+          },
+          {
+            "group": "Client Setup",
+            "pages": [
+              "api/orpc-client",
+              "api/tanstack-query"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe RPC with ORPC",
+    "Better Auth email/password authentication",
+    "Protected and public procedures",
+    "Middleware-based authorization",
+    "TanStack Query integration",
+    "Drizzle ORM with SQLite/Turso",
+    "Next.js App Router",
+    "Server and client-side session management"
+  ],
+  "publicApiSurface": [
+    "appRouter.healthCheck",
+    "appRouter.privateData",
+    "appRouter.todo.getAll",
+    "appRouter.todo.create",
+    "appRouter.todo.toggle",
+    "appRouter.todo.delete",
+    "auth.api.getSession",
+    "createContext",
+    "publicProcedure",
+    "protectedProcedure",
+    "requireAuth middleware"
+  ]
+}
